@@ -144,6 +144,9 @@ class WeatherExecutor(AgentExecutor):
 
         # Check API key before attempting LLM calls
         config = Configuration()
+        logger.warning(f"LLM_API_KEY is {config.llm_api_key}")
+        logger.warning(f"LLM_API_BASE is {config.llm_api_base}")
+        logger.warning(f"LLM_MODEL is {config.llm_model}")
         if not config.has_valid_api_key:
             await event_emitter.emit_event(
                 "Error: No LLM API key configured. Set the LLM_API_KEY environment variable.",

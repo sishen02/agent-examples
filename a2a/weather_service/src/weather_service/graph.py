@@ -34,10 +34,6 @@ def get_mcpclient(headers=None):
 
 
 async def get_graph(client) -> StateGraph:
-    logging.info("Creating LLM instance...")
-    logging.info(f"LLM model: {config.llm_model}")
-    logging.info(f"LLM API base: {config.llm_api_base}")
-    logging.info(f"LLM API key: {config.llm_api_key}")
     llm = ChatOpenAI(
         model=config.llm_model,
         openai_api_key=config.llm_api_key,
