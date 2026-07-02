@@ -5,6 +5,7 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_openai import ChatOpenAI
 from langgraph.graph import START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
+import logging
 
 from weather_service.configuration import Configuration
 
@@ -33,6 +34,10 @@ def get_mcpclient(headers=None):
 
 
 async def get_graph(client) -> StateGraph:
+    logging.info("Creating LLM instance...")
+    logging.info(f"LLM model: {config.llm_model}")
+    logging.info(f"LLM API base: {config.llm_api_base}")
+    logging.info(f"LLM API key: {config.llm_api_key}")
     llm = ChatOpenAI(
         model=config.llm_model,
         openai_api_key=config.llm_api_key,
