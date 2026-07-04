@@ -224,3 +224,5 @@ secrets.*
 
 # Bogus lock files created by running uv in home directory.
 uv.lock
+!a2a/cockroachdb_operator_agent/uv.lock
+!mcp/cockroachdb_tool/uv.lock
