@@ -13,12 +13,17 @@ It is not a background reconciliation controller.
 
 ## Configuration
 
+Template env files are provided:
+
+- `.env.openai` - OpenAI-compatible production-style config with secret refs
+- `.env.vllm` - local VLLM config
+
 ```bash
 export MCP_URL="http://cockroachdb-tool:8000/mcp"
 export MCP_TRANSPORT="streamable_http"
 export LLM_MODEL="llama3.2:3b-instruct-fp16"
-export LLM_API_BASE="http://host.docker.internal:11434/v1"
-export LLM_API_KEY="dummy"
+export LLM_API_BASE="http://172.19.0.1:8000/v1"
+export LLM_API_KEY="api-key"
 ```
 
 ## Run
@@ -34,4 +39,3 @@ Example prompts:
 - `Check node health and recent failed jobs.`
 - `Plan a safe restart for pod cockroachdb-1.`
 - `I approve restarting pod cockroachdb-1.`
-

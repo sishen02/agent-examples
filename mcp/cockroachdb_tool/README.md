@@ -23,6 +23,8 @@ The server fails closed:
 
 ## Configuration
 
+Use `.env.template` as the reference for tool runtime environment variables.
+
 ```bash
 export COCKROACH_DSN="postgresql://root@cockroach-public:26257/defaultdb?sslmode=require"
 export K8S_NAMESPACE="default"
@@ -46,4 +48,3 @@ export MCP_TRANSPORT=http
 uv sync
 uv run cockroachdb_tool.py
 ```
-
