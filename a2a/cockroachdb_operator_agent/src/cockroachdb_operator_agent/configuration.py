@@ -11,5 +11,5 @@ class Configuration(BaseSettings):
     MCP_TRANSPORT: str = "streamable_http"
     MCP_TIMEOUT: int = 600
     MAX_EVENT_DISPLAY_LENGTH: int = 384
+    MAX_HISTORY_MESSAGES: int = 20
     AGENT_VERSION: str = "1.0.0"
-

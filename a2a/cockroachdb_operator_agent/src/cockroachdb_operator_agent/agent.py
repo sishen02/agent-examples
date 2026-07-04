@@ -2,10 +2,11 @@
 
 import logging
 import os
+from collections import defaultdict, deque
 from textwrap import dedent
 
 import uvicorn
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from openinference.instrumentation.langchain import LangChainInstrumentor
 from starlette.applications import Starlette
 
@@ -24,6 +25,31 @@ logger = logging.getLogger(__name__)
 
 LangChainInstrumentor().instrument()
 config = Configuration()
+
+
+class ConversationHistory:
+    """Bounded in-memory chat history keyed by A2A context_id."""
+
+    def __init__(self, max_messages: int):
+        self.max_messages = max(2, max_messages)
+        self._messages: dict[str, deque[BaseMessage]] = defaultdict(lambda: deque(maxlen=self.max_messages))
+
+    def build_turn_messages(self, context_id: str, user_input: str) -> list[BaseMessage]:
+        """Return previous messages plus the current user message."""
+        return list(self._messages[context_id]) + [HumanMessage(content=user_input)]
+
+    def record_turn(self, context_id: str, user_input: str, assistant_output: str) -> None:
+        """Persist the current user/assistant text turn."""
+        history = self._messages[context_id]
+        history.append(HumanMessage(content=user_input))
+        history.append(AIMessage(content=assistant_output))
+
+    def get_messages(self, context_id: str) -> list[BaseMessage]:
+        """Return a copy of stored messages for tests and diagnostics."""
+        return list(self._messages[context_id])
+
+
+conversation_history = ConversationHistory(config.MAX_HISTORY_MESSAGES)
 
 
 def get_agent_card(host: str, port: int) -> AgentCard:
@@ -127,7 +153,7 @@ class CockroachDBOperatorExecutor(AgentExecutor):
 
             graph = await get_graph(mcpclient)
             output = None
-            graph_input = {"messages": [HumanMessage(content=user_input)]}
+            graph_input = {"messages": conversation_history.build_turn_messages(task.context_id, user_input)}
             async for event in graph.astream(graph_input, stream_mode="updates"):
                 output = event
                 await event_emitter.emit_event(
@@ -140,7 +166,9 @@ class CockroachDBOperatorExecutor(AgentExecutor):
                 )
 
             final_answer = output.get("assistant", {}).get("final_answer") if output else None
-            await event_emitter.emit_event(str(final_answer or "Task completed without a final answer."), final=True)
+            final_text = str(final_answer or "Task completed without a final answer.")
+            conversation_history.record_turn(task.context_id, user_input, final_text)
+            await event_emitter.emit_event(final_text, final=True)
         except Exception as exc:
             logger.exception("CockroachDB operator execution failed")
             await event_emitter.emit_event(f"Error: Failed to process CockroachDB request. {exc}", failed=True)
@@ -167,4 +195,3 @@ def run():
     routes.extend(create_jsonrpc_routes(request_handler, "/", enable_v0_3_compat=True))
     app = Starlette(routes=routes)
     uvicorn.run(app, host=host, port=port)
-

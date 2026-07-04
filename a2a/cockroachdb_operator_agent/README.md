@@ -26,6 +26,9 @@ export LLM_API_BASE="http://172.19.0.1:8000/v1"
 export LLM_API_KEY="api-key"
 ```
 
+Conversation history is held in memory per A2A `context_id` and bounded by
+`MAX_HISTORY_MESSAGES`. A pod restart clears this history.
+
 ## Run
 
 ```bash
