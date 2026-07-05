@@ -37,8 +37,8 @@ class ToolSettings(BaseSettings):
     k8s_namespace: str = "cockroachdb"
     cockroach_label_selector: str = "app.kubernetes.io/name=cockroachdb"
     enable_kubernetes: bool = True
-    mcp_read_only: bool = True
-    require_approval: bool = True
+    mcp_read_only: bool = False
+    require_approval: bool = False
     host: str = "0.0.0.0"
     port: int = 9090
     mcp_transport: str = "http"
