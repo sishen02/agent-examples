@@ -40,7 +40,7 @@ class ToolSettings(BaseSettings):
     mcp_read_only: bool = True
     require_approval: bool = True
     host: str = "0.0.0.0"
-    port: int = 8000
+    port: int = 9090
     mcp_transport: str = "http"
 
 
