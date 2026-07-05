@@ -26,8 +26,8 @@ The server fails closed:
 Use `.env.template` as the reference for tool runtime environment variables.
 
 ```bash
-export COCKROACH_DSN="postgresql://root@cockroach-public:26257/defaultdb?sslmode=require"
-export K8S_NAMESPACE="default"
+export COCKROACH_DSN="postgresql://root@cockroachdb.cockroachdb.svc.cluster.local:26257/defaultdb?sslmode=disable"
+export K8S_NAMESPACE="cockroachdb"
 export COCKROACH_LABEL_SELECTOR="app.kubernetes.io/name=cockroachdb"
 export MCP_READ_ONLY=true
 export REQUIRE_APPROVAL=true
@@ -48,3 +48,8 @@ export MCP_TRANSPORT=http
 uv sync
 uv run cockroachdb_tool.py
 ```
+
+The Kagenti Kind example manifest deploys a single-node insecure CockroachDB
+Deployment in the `cockroachdb` namespace with service name `cockroachdb`.
+Because that sample is a Deployment, `scale_statefulset()` is intended for
+production-style CockroachDB StatefulSet deployments, not that local sample.

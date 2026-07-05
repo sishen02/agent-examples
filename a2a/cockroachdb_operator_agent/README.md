@@ -19,7 +19,7 @@ Template env files are provided:
 - `.env.vllm` - local VLLM config
 
 ```bash
-export MCP_URL="http://cockroachdb-tool:8000/mcp"
+export MCP_URL="http://cockroachdb-tool-mcp.cockroachdb.svc.cluster.local:8000/mcp"
 export MCP_TRANSPORT="streamable_http"
 export LLM_MODEL="llama3.2:3b-instruct-fp16"
 export LLM_API_BASE="http://172.19.0.1:8000/v1"

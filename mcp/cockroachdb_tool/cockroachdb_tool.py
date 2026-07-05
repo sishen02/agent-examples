@@ -32,9 +32,9 @@ mcp = FastMCP("CockroachDB Operator")
 
 
 class ToolSettings(BaseSettings):
-    cockroach_dsn: str = ""
+    cockroach_dsn: str = "postgresql://root@cockroachdb.cockroachdb.svc.cluster.local:26257/defaultdb?sslmode=disable"
     connect_timeout: int = 10
-    k8s_namespace: str = "default"
+    k8s_namespace: str = "cockroachdb"
     cockroach_label_selector: str = "app.kubernetes.io/name=cockroachdb"
     enable_kubernetes: bool = True
     mcp_read_only: bool = True
