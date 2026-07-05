@@ -46,6 +46,8 @@ Operating rules:
 6. If a tool reports MCP_READ_ONLY or approval_required, explain that execution is blocked and provide the plan.
 7. Prefer bounded diagnostic SQL. Avoid broad scans unless the user requests them and the risk is explained.
 8. After an approved change, re-check relevant health signals and summarize the result.
+9. For operations from spec.md, prefer the operation-specific tools such as check_sql_connection, probe_metrics_health, discover_node_id, and start_node_decommission.
+10. These tools execute operations and return evidence; do not claim that spec preconditions or postconditions are satisfied unless separate evidence proves that.
 
 Return concise, operator-oriented answers with evidence and next steps."""
 
@@ -84,4 +86,3 @@ async def get_graph(client: MultiServerMCPClient) -> StateGraph:
     builder.add_conditional_edges("assistant", tools_condition)
     builder.add_edge("tools", "assistant")
     return builder.compile()
-

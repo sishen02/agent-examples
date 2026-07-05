@@ -38,6 +38,19 @@ class FakeCockroachProvider:
     def jobs(self, status=None, limit=25):
         return {"jobs": [{"status": status or "running"}]}
 
+    def sql_connect(self):
+        return {"operation": "check_sql_connection", "sql_available": True}
+
+    def get_cluster_setting(self, setting_name):
+        return {"setting_name": setting_name, "rows": [{"value": "1"}]}
+
+    def set_cluster_setting(self, setting_name, value):
+        self.executed.append(("set_cluster_setting", setting_name, value))
+        return {"changed": True, "setting_name": setting_name, "value": value}
+
+    def read_zone_config(self, target_type=None, target_name=None, max_rows=100):
+        return {"rows": [{"target_type": target_type, "target_name": target_name}], "row_count": 1}
+
 
 class FakeKubernetesProvider:
     def __init__(self):
@@ -54,6 +67,33 @@ class FakeKubernetesProvider:
     def restart_pod(self, pod_name):
         self.restarted.append(pod_name)
         return {"changed": True, "pod": pod_name}
+
+    def exec_cockroach(self, pod_name, container, args):
+        return {"pod": pod_name, "container": container, "command": ["cockroach", *args], "exit_code": 0}
+
+    def metrics_health(self, **kwargs):
+        return {"pods": [{"pod": "crdb-0", "ok": True}], "all_ok": True, "kwargs": kwargs}
+
+    def start_config(self, pod_name=None, statefulset_name=None):
+        return {"pod": pod_name, "statefulset": statefulset_name}
+
+    def membership_evidence(self, statefulset_name, desired_replicas):
+        return {"statefulset": statefulset_name, "desired_replicas": desired_replicas}
+
+    def rollout_evidence(self, statefulset_name, partition=None, desired_image=None):
+        return {"statefulset": statefulset_name, "partition": partition, "desired_image": desired_image}
+
+    def cleanup_restart_annotation(self, resource_name, annotation_key, expected_value=None):
+        return {"changed": True, "resource": resource_name, "annotation_key": annotation_key}
+
+    def sync_ingress_host(self, name, host, service_name, service_port, tls_secret_name=None, path="/"):
+        return {"changed": True, "ingress": name, "host": host}
+
+    def delete_ingress(self, name):
+        return {"changed": True, "ingress": name, "deleted": True}
+
+    def version_check_job(self, job_name, image, expected_version=None, timeout_seconds=120, delete_after=True):
+        return {"changed": True, "job": job_name, "image": image, "expected_version": expected_version}
 
 
 def test_read_only_sql_is_allowed(tool_module):
@@ -113,6 +153,45 @@ def test_read_only_sql_classifier(tool_module):
     assert tool_module._is_read_only_sql("SHOW JOBS")
     assert tool_module._is_read_only_sql("EXPLAIN SELECT 1")
     assert not tool_module._is_read_only_sql("UPDATE foo SET bar = 1")
+
+
+def test_spec_named_sql_tools(tool_module, monkeypatch):
+    provider = FakeCockroachProvider()
+    tool_module.cockroach_provider = provider
+    monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
+    monkeypatch.setattr(tool_module.settings, "require_approval", True)
+
+    assert json.loads(tool_module.check_sql_connection())["sql_available"] is True
+    assert json.loads(tool_module.get_cluster_setting("cluster.organization"))["setting_name"] == "cluster.organization"
+    assert json.loads(tool_module.read_zone_config("DATABASE", "defaultdb"))["row_count"] == 1
+
+    blocked = json.loads(tool_module.set_cluster_setting("kv.snapshot_rebalance.max_rate", "1MiB", approved=False))
+    assert blocked["approval_required"] is True
+
+    changed = json.loads(tool_module.set_cluster_setting("kv.snapshot_rebalance.max_rate", "1MiB", approved=True))
+    assert changed["changed"] is True
+    assert provider.executed == [("set_cluster_setting", "kv.snapshot_rebalance.max_rate", "1MiB")]
+
+
+def test_spec_named_kubernetes_tools(tool_module, monkeypatch):
+    provider = FakeKubernetesProvider()
+    tool_module.kubernetes_provider = provider
+    monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
+    monkeypatch.setattr(tool_module.settings, "require_approval", True)
+    monkeypatch.setattr(tool_module.settings, "statefulset_name", "cockroachdb")
+
+    assert json.loads(tool_module.probe_metrics_health())["passes"][0]["all_ok"] is True
+    assert json.loads(tool_module.discover_node_id(target_host="cockroachdb-0"))["exit_code"] == 0
+    assert json.loads(tool_module.get_start_config())["statefulset"] == "cockroachdb"
+    assert json.loads(tool_module.get_membership_evidence(desired_replicas=3))["desired_replicas"] == 3
+    assert json.loads(tool_module.get_rollout_evidence(partition=0))["partition"] == 0
+
+    blocked = json.loads(tool_module.start_node_decommission(2, approved=False))
+    assert blocked["approval_required"] is True
+
+    changed = json.loads(tool_module.start_node_decommission(2, approved=True))
+    assert changed["approved"] is True
+    assert changed["exit_code"] == 0
 
 
 def test_cluster_overview_avoids_internal_tables():
