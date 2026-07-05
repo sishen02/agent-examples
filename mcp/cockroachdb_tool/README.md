@@ -4,8 +4,8 @@ FastMCP server for CockroachDB operations. It is designed to be used by an agent
 
 ## Tools
 
-- `get_cluster_overview()` - CockroachDB version, nodes, and databases.
-- `get_node_health()` - node liveness and range health indicators.
+- `get_cluster_overview()` - CockroachDB version and databases using safe SQL metadata.
+- `get_node_health()` - SQL reachability using safe SQL metadata.
 - `list_jobs(status, limit)` - recent CockroachDB jobs.
 - `get_kubernetes_status()` - pods, StatefulSets, services, and recent events.
 - `run_sql(query, max_rows, approved)` - diagnostic SQL by default; mutating SQL requires approval.
@@ -20,6 +20,7 @@ The server fails closed:
 - `MCP_READ_ONLY=true` blocks every mutating tool.
 - `REQUIRE_APPROVAL=true` requires `approved=true` for mutating tools.
 - Read-only SQL is limited to statements beginning with `SELECT`, `SHOW`, `EXPLAIN`, or `WITH`.
+- Default overview and health tools avoid `crdb_internal` metadata so they work in environments that restrict CockroachDB internal interfaces.
 
 ## Configuration
 
@@ -41,6 +42,18 @@ export HOST=0.0.0.0
 export PORT=8000
 export MCP_TRANSPORT=http
 ```
+
+## Kubernetes RBAC
+
+When the tool is deployed by Kagenti in `team1` as `cockroach-db-tool`, it needs
+read permission in the `cockroachdb` namespace to inspect pods, StatefulSets,
+services, and events:
+
+```bash
+kubectl apply -f kagenti/kagenti/examples/databases/cockroachdb-tool-rbac.yaml
+```
+
+The Kind installer also applies this manifest when run with `--with-cockroachdb`.
 
 ## Run
 

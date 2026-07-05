@@ -62,41 +62,30 @@ class CockroachSQLProvider:
 
     def cluster_overview(self) -> dict[str, Any]:
         version = self.query("SELECT version()", max_rows=1)
-        nodes = self.query(
-            """
-            SELECT node_id, address, sql_address, build, started_at, updated_at, locality, is_available, is_live
-            FROM crdb_internal.gossip_nodes
-            ORDER BY node_id
-            """,
-            max_rows=100,
-        )
         databases = self.query("SHOW DATABASES", max_rows=200)
         database_names = [row.get("database_name") or row.get("Database") for row in databases.get("rows", [])]
         return {
-            "source": "sql",
+            "source": "sql_safe",
             "version": version.get("rows", [{}])[0].get("version") if version.get("rows") else None,
-            "nodes": nodes.get("rows", []),
+            "nodes": [],
             "databases": [name for name in database_names if name],
+            "notes": [
+                "Node metadata is not queried by default because it depends on CockroachDB internal interfaces.",
+            ],
         }
 
     def node_health(self) -> dict[str, Any]:
-        nodes = self.query(
-            """
-            SELECT node_id, address, is_available, is_live, updated_at, locality
-            FROM crdb_internal.gossip_nodes
-            ORDER BY node_id
-            """,
-            max_rows=100,
-        )
-        ranges = self.query(
-            """
-            SELECT count(*) AS unavailable_ranges
-            FROM crdb_internal.ranges
-            WHERE array_length(replicas, 1) = 0
-            """,
-            max_rows=1,
-        )
-        return {"nodes": nodes.get("rows", []), "range_summary": ranges.get("rows", [])}
+        sql_probe = self.query("SELECT 1 AS sql_available, now() AS checked_at", max_rows=1)
+        return {
+            "source": "sql_safe",
+            "sql_available": bool(sql_probe.get("rows")),
+            "checked_at": sql_probe.get("rows", [{}])[0].get("checked_at") if sql_probe.get("rows") else None,
+            "nodes": [],
+            "range_summary": [],
+            "notes": [
+                "Node liveness, range health, and job metadata are not queried by default because they can depend on restricted CockroachDB internal/system interfaces.",
+            ],
+        }
 
     def jobs(self, status: str | None = None, limit: int = 25) -> dict[str, Any]:
         params: tuple[Any, ...]
@@ -119,4 +108,3 @@ class CockroachSQLProvider:
             params = (limit,)
         result = self.query(sql, params=params, max_rows=limit)
         return {"jobs": result.get("rows", [])}
-

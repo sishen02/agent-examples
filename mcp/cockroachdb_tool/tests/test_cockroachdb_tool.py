@@ -113,3 +113,50 @@ def test_read_only_sql_classifier(tool_module):
     assert tool_module._is_read_only_sql("SHOW JOBS")
     assert tool_module._is_read_only_sql("EXPLAIN SELECT 1")
     assert not tool_module._is_read_only_sql("UPDATE foo SET bar = 1")
+
+
+def test_cluster_overview_avoids_internal_tables():
+    from cockroachdb_tool.providers.sql import CockroachSQLProvider
+
+    class RecordingProvider(CockroachSQLProvider):
+        def __init__(self):
+            self.queries = []
+
+        def query(self, sql, params=None, max_rows=100):
+            self.queries.append(sql)
+            if "version()" in sql:
+                return {"rows": [{"version": "CockroachDB test"}]}
+            if "SHOW DATABASES" in sql:
+                return {"rows": [{"database_name": "defaultdb"}]}
+            return {"rows": []}
+
+    provider = RecordingProvider()
+    result = provider.cluster_overview()
+
+    assert result["source"] == "sql_safe"
+    assert result["nodes"] == []
+    assert result["databases"] == ["defaultdb"]
+    assert "crdb_internal" not in "\n".join(provider.queries)
+
+
+def test_node_health_avoids_internal_tables():
+    from cockroachdb_tool.providers.sql import CockroachSQLProvider
+
+    class RecordingProvider(CockroachSQLProvider):
+        def __init__(self):
+            self.queries = []
+
+        def query(self, sql, params=None, max_rows=100):
+            self.queries.append(sql)
+            if "SELECT 1 AS sql_available" in sql:
+                return {"rows": [{"sql_available": 1, "checked_at": "now"}]}
+            return {"rows": []}
+
+    provider = RecordingProvider()
+    result = provider.node_health()
+
+    assert result["source"] == "sql_safe"
+    assert result["sql_available"] is True
+    assert result["nodes"] == []
+    assert result["range_summary"] == []
+    assert "crdb_internal" not in "\n".join(provider.queries)
