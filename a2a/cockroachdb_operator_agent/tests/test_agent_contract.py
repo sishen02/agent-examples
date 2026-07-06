@@ -7,7 +7,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from cockroachdb_operator_agent.agent import (
     ConversationHistory,
-    _extract_final_text_from_graph_event,
+    _extract_final_text_from_graph_state,
     get_agent_card,
 )
 from cockroachdb_operator_agent.graph import SYSTEM_PROMPT, get_mcpclient
@@ -17,7 +17,7 @@ def test_agent_card_describes_cockroachdb_operator():
     card = get_agent_card("localhost", 8000)
 
     assert card.name == "CockroachDB Operator Agent"
-    assert card.capabilities.streaming is True
+    assert card.capabilities.streaming is False
     assert card.skills[0].id == "cockroachdb_operator"
     assert "cockroachdb" in card.skills[0].tags
 
@@ -73,33 +73,23 @@ def test_conversation_history_trims_old_messages():
     assert [message.content for message in messages] == ["turn 2", "answer 2", "turn 3", "answer 3"]
 
 
-def test_extract_final_text_from_explicit_final_answer():
-    event = {"assistant": {"final_answer": "Done."}}
-
-    assert _extract_final_text_from_graph_event(event) == "Done."
-
-
-def test_extract_final_text_from_assistant_message_when_final_answer_missing():
-    event = {
-        "assistant": {
-            "messages": [
-                HumanMessage(content="Move the data"),
-                AIMessage(content="I need approval before running the migration."),
-            ]
-        }
+def test_extract_final_text_from_last_assistant_message():
+    state = {
+        "messages": [
+            HumanMessage(content="Move the data"),
+            AIMessage(content="I need approval before running the migration."),
+        ]
     }
 
-    assert _extract_final_text_from_graph_event(event) == "I need approval before running the migration."
+    assert _extract_final_text_from_graph_state(state) == "I need approval before running the migration."
 
 
 def test_extract_final_text_ignores_tool_call_messages():
-    event = {
-        "assistant": {
-            "messages": [
-                AIMessage(content="Prior answer"),
-                AIMessage(content="", tool_calls=[{"name": "run_sql", "args": {}, "id": "call-1"}]),
-            ]
-        }
+    state = {
+        "messages": [
+            AIMessage(content="Prior answer"),
+            AIMessage(content="", tool_calls=[{"name": "run_sql", "args": {}, "id": "call-1"}]),
+        ]
     }
 
-    assert _extract_final_text_from_graph_event(event) == "Prior answer"
+    assert _extract_final_text_from_graph_state(state) is None

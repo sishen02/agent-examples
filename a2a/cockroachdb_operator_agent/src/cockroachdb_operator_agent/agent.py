@@ -70,27 +70,19 @@ def _content_to_text(content: Any) -> str | None:
     return None
 
 
-def _extract_final_text_from_graph_event(event: dict[str, Any]) -> str | None:
-    """Extract the latest assistant text from a LangGraph update event."""
-    assistant_update = event.get("assistant")
-    if not isinstance(assistant_update, dict):
-        return None
-
-    text = _content_to_text(assistant_update.get("final_answer"))
-    if text:
-        return text
-
-    for message in reversed(assistant_update.get("messages") or []):
-        if isinstance(message, AIMessage) and not getattr(message, "tool_calls", None):
-            text = _content_to_text(message.content)
-            if text:
-                return text
+def _extract_final_text_from_graph_state(state: dict[str, Any]) -> str | None:
+    """Extract the final assistant text from the completed LangGraph message state."""
+    messages = state.get("messages") or []
+    if messages:
+        newest_message = messages[-1]
+        if isinstance(newest_message, AIMessage) and not getattr(newest_message, "tool_calls", None):
+            return _content_to_text(newest_message.content)
     return None
 
 
 def get_agent_card(host: str, port: int) -> AgentCard:
     """Return the A2A agent card."""
-    capabilities = AgentCapabilities(streaming=True)
+    capabilities = AgentCapabilities(streaming=False)
     skill = AgentSkill(
         id="cockroachdb_operator",
         name="CockroachDB Operator",
@@ -134,7 +126,7 @@ def get_agent_card(host: str, port: int) -> AgentCard:
 
 
 class A2AEvent:
-    """Helper for streaming A2A task updates."""
+    """Helper for A2A task status and final result updates."""
 
     def __init__(self, task_updater: TaskUpdater):
         self.task_updater = task_updater
@@ -188,21 +180,9 @@ class CockroachDBOperatorExecutor(AgentExecutor):
                 )
 
             graph = await get_graph(mcpclient)
-            final_text = None
             graph_input = {"messages": conversation_history.build_turn_messages(task.context_id, user_input)}
-            async for event in graph.astream(graph_input, stream_mode="updates"):
-                extracted_final_text = _extract_final_text_from_graph_event(event)
-                if extracted_final_text:
-                    final_text = extracted_final_text
-                await event_emitter.emit_event(
-                    "\n".join(
-                        f"{key}: "
-                        f"{str(value)[: config.MAX_EVENT_DISPLAY_LENGTH]
-                            + '...' if len(str(value)) > config.MAX_EVENT_DISPLAY_LENGTH else str(value)}"
-                        for key, value in event.items()
-                    )
-                    + "\n"
-                )
+            graph_output = await graph.ainvoke(graph_input)
+            final_text = _extract_final_text_from_graph_state(graph_output)
 
             if not final_text:
                 logger.warning("Graph completed without a final assistant answer")

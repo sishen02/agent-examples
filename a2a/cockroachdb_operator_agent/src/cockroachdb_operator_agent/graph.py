@@ -2,7 +2,7 @@
 
 import logging
 
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import SystemMessage
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_openai import ChatOpenAI
 from langgraph.graph import START, MessagesState, StateGraph
@@ -12,10 +12,6 @@ from cockroachdb_operator_agent.configuration import Configuration
 
 logger = logging.getLogger(__name__)
 config = Configuration()
-
-
-class ExtendedMessagesState(MessagesState):
-    final_answer: str = ""
 
 
 def get_mcpclient() -> MultiServerMCPClient:
@@ -72,14 +68,11 @@ async def get_graph(client: MultiServerMCPClient) -> StateGraph:
 
     sys_msg = SystemMessage(content=SYSTEM_PROMPT)
 
-    def assistant(state: ExtendedMessagesState) -> ExtendedMessagesState:
+    def assistant(state: MessagesState) -> MessagesState:
         result = llm_with_tools.invoke([sys_msg] + state["messages"])
-        updated_state = {"messages": state["messages"] + [result]}
-        if isinstance(result, AIMessage) and not result.tool_calls:
-            updated_state["final_answer"] = result.content
-        return updated_state
+        return {"messages": [result]}
 
-    builder = StateGraph(ExtendedMessagesState)
+    builder = StateGraph(MessagesState)
     builder.add_node("assistant", assistant)
     builder.add_node("tools", ToolNode(tools))
     builder.add_edge(START, "assistant")
