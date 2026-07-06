@@ -105,6 +105,6 @@ export COCKROACH_DSN="postgresql://root@127.0.0.1:26257/defaultdb?sslmode=disabl
 ```
 
 The Kagenti Kind example manifest deploys a single-node insecure CockroachDB
-Deployment in the `cockroachdb` namespace with service name `cockroachdb`.
-Because that sample is a Deployment, `scale_statefulset()` is intended for
-production-style CockroachDB StatefulSet deployments, not that local sample.
+StatefulSet in the `cockroachdb` namespace with service name `cockroachdb`.
+It is still a single-node `start-single-node` example; increasing StatefulSet
+replicas does not create a valid multi-node CockroachDB cluster.
