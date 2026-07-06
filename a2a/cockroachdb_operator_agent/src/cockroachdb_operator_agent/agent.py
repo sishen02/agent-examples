@@ -4,6 +4,7 @@ import logging
 import os
 from collections import defaultdict, deque
 from textwrap import dedent
+from typing import Any
 
 import uvicorn
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
@@ -50,6 +51,41 @@ class ConversationHistory:
 
 
 conversation_history = ConversationHistory(config.MAX_HISTORY_MESSAGES)
+
+
+def _content_to_text(content: Any) -> str | None:
+    """Return non-empty text from common LangChain message content shapes."""
+    if isinstance(content, str):
+        text = content.strip()
+        return text or None
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        text = "\n".join(part.strip() for part in parts if part.strip())
+        return text or None
+    return None
+
+
+def _extract_final_text_from_graph_event(event: dict[str, Any]) -> str | None:
+    """Extract the latest assistant text from a LangGraph update event."""
+    assistant_update = event.get("assistant")
+    if not isinstance(assistant_update, dict):
+        return None
+
+    text = _content_to_text(assistant_update.get("final_answer"))
+    if text:
+        return text
+
+    for message in reversed(assistant_update.get("messages") or []):
+        if isinstance(message, AIMessage) and not getattr(message, "tool_calls", None):
+            text = _content_to_text(message.content)
+            if text:
+                return text
+    return None
 
 
 def get_agent_card(host: str, port: int) -> AgentCard:
@@ -152,21 +188,25 @@ class CockroachDBOperatorExecutor(AgentExecutor):
                 )
 
             graph = await get_graph(mcpclient)
-            output = None
+            final_text = None
             graph_input = {"messages": conversation_history.build_turn_messages(task.context_id, user_input)}
             async for event in graph.astream(graph_input, stream_mode="updates"):
-                output = event
+                extracted_final_text = _extract_final_text_from_graph_event(event)
+                if extracted_final_text:
+                    final_text = extracted_final_text
                 await event_emitter.emit_event(
                     "\n".join(
                         f"{key}: "
-                        f"{str(value)[: config.MAX_EVENT_DISPLAY_LENGTH] + '...' if len(str(value)) > config.MAX_EVENT_DISPLAY_LENGTH else str(value)}"
+                        f"{str(value)[: config.MAX_EVENT_DISPLAY_LENGTH]
+                            + '...' if len(str(value)) > config.MAX_EVENT_DISPLAY_LENGTH else str(value)}"
                         for key, value in event.items()
                     )
                     + "\n"
                 )
 
-            final_answer = output.get("assistant", {}).get("final_answer") if output else None
-            final_text = str(final_answer or "Task completed without a final answer.")
+            if not final_text:
+                logger.warning("Graph completed without a final assistant answer")
+                final_text = "Task completed without a final answer."
             conversation_history.record_turn(task.context_id, user_input, final_text)
             await event_emitter.emit_event(final_text, final=True)
         except Exception as exc:
