@@ -80,9 +80,30 @@ def _extract_final_text_from_graph_state(state: dict[str, Any]) -> str | None:
     return None
 
 
+def _format_graph_update(event: dict[str, Any]) -> str:
+    """Format a streamed LangGraph update for A2A intermediate status."""
+    return (
+        "\n".join(
+            f"🚶‍♂️{key}: {str(value)[:256] + '...' if len(str(value)) > 256 else str(value)}"
+            for key, value in event.items()
+        )
+        + "\n"
+    )
+
+
+def _extract_final_text_from_graph_update(event: dict[str, Any]) -> str | None:
+    """Extract final assistant text from a single LangGraph streamed update."""
+    for update in event.values():
+        if isinstance(update, dict):
+            text = _extract_final_text_from_graph_state(update)
+            if text:
+                return text
+    return None
+
+
 def get_agent_card(host: str, port: int) -> AgentCard:
     """Return the A2A agent card."""
-    capabilities = AgentCapabilities(streaming=False)
+    capabilities = AgentCapabilities(streaming=True)
     skill = AgentSkill(
         id="cockroachdb_operator",
         name="CockroachDB Operator",
@@ -181,8 +202,13 @@ class CockroachDBOperatorExecutor(AgentExecutor):
 
             graph = await get_graph(mcpclient)
             graph_input = {"messages": conversation_history.build_turn_messages(task.context_id, user_input)}
-            graph_output = await graph.ainvoke(graph_input)
-            final_text = _extract_final_text_from_graph_state(graph_output)
+            final_text = None
+            async for event in graph.astream(graph_input, stream_mode="updates"):
+                await event_emitter.emit_event(_format_graph_update(event))
+                update_final_text = _extract_final_text_from_graph_update(event)
+                if update_final_text:
+                    final_text = update_final_text
+                logger.info("event: %s", event)
 
             if not final_text:
                 logger.warning("Graph completed without a final assistant answer")

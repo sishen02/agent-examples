@@ -8,6 +8,8 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from cockroachdb_operator_agent.agent import (
     ConversationHistory,
     _extract_final_text_from_graph_state,
+    _extract_final_text_from_graph_update,
+    _format_graph_update,
     get_agent_card,
 )
 from cockroachdb_operator_agent.graph import SYSTEM_PROMPT, build_finalizer_messages, get_mcpclient
@@ -17,7 +19,7 @@ def test_agent_card_describes_cockroachdb_operator():
     card = get_agent_card("localhost", 8000)
 
     assert card.name == "CockroachDB Operator Agent"
-    assert card.capabilities.streaming is False
+    assert card.capabilities.streaming is True
     assert card.skills[0].id == "cockroachdb_operator"
     assert "cockroachdb" in card.skills[0].tags
 
@@ -93,6 +95,37 @@ def test_extract_final_text_ignores_tool_call_messages():
     }
 
     assert _extract_final_text_from_graph_state(state) is None
+
+
+def test_extract_final_text_from_streamed_update():
+    event = {
+        "assistant": {
+            "messages": [
+                AIMessage(content="The cluster is healthy."),
+            ]
+        }
+    }
+
+    assert _extract_final_text_from_graph_update(event) == "The cluster is healthy."
+
+
+def test_extract_final_text_from_streamed_update_ignores_tool_call_messages():
+    event = {
+        "assistant": {
+            "messages": [
+                AIMessage(content="", tool_calls=[{"name": "check_node_health", "args": {}, "id": "call-1"}]),
+            ]
+        }
+    }
+
+    assert _extract_final_text_from_graph_update(event) is None
+
+
+def test_format_graph_update_matches_intermediate_event_shape():
+    formatted = _format_graph_update({"tools": {"messages": ["tool result"]}})
+
+    assert formatted.startswith("🚶‍♂️tools: ")
+    assert formatted.endswith("\n")
 
 
 def test_build_finalizer_messages_removes_empty_final_assistant_message():
