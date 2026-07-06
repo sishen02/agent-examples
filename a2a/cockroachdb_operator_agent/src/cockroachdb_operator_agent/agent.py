@@ -73,11 +73,18 @@ def _content_to_text(content: Any) -> str | None:
 def _extract_final_text_from_graph_state(state: dict[str, Any]) -> str | None:
     """Extract the final assistant text from the completed LangGraph message state."""
     messages = state.get("messages") or []
-    logger.debug("Graph state messages: %s", messages)
     if messages:
         newest_message = messages[-1]
+        logger.debug(
+            "Graph completed with message_count=%d last_message_type=%s last_has_tool_calls=%s",
+            len(messages),
+            type(newest_message).__name__,
+            bool(getattr(newest_message, "tool_calls", None)),
+        )
         if isinstance(newest_message, AIMessage) and not getattr(newest_message, "tool_calls", None):
             return _content_to_text(newest_message.content)
+    else:
+        logger.debug("Graph completed with no messages")
     return None
 
 
