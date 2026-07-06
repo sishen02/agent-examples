@@ -105,6 +105,16 @@ def test_read_only_sql_is_allowed(tool_module):
     assert result["rows"] == [{"ok": True}]
 
 
+def test_settings_allow_mutations_by_default(tool_module, monkeypatch):
+    monkeypatch.delenv("MCP_READ_ONLY", raising=False)
+    monkeypatch.delenv("REQUIRE_APPROVAL", raising=False)
+
+    settings = tool_module.ToolSettings()
+
+    assert settings.mcp_read_only is False
+    assert settings.require_approval is False
+
+
 def test_mutating_sql_requires_approval(tool_module):
     tool_module.cockroach_provider = FakeCockroachProvider()
 
@@ -239,3 +249,71 @@ def test_node_health_avoids_internal_tables():
     assert result["nodes"] == []
     assert result["range_summary"] == []
     assert "crdb_internal" not in "\n".join(provider.queries)
+
+
+def test_parse_simple_label_selector():
+    from cockroachdb_tool.providers.kubernetes import _parse_simple_label_selector
+
+    assert _parse_simple_label_selector("app.kubernetes.io/name=cockroachdb") == {
+        "app.kubernetes.io/name": "cockroachdb"
+    }
+    assert _parse_simple_label_selector("app==cockroachdb,tier=database") == {
+        "app": "cockroachdb",
+        "tier": "database",
+    }
+    assert _parse_simple_label_selector("app!=cockroachdb") == {}
+
+
+def test_kubernetes_status_falls_back_to_legacy_label_and_matches_service_selector():
+    from cockroachdb_tool.providers.kubernetes import KubernetesAPIProvider
+
+    class Obj:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    def klist(items):
+        return Obj(items=items)
+
+    pod = Obj(
+        metadata=Obj(name="cockroachdb-abc", creation_timestamp=None),
+        status=Obj(phase="Running", container_statuses=[Obj(ready=True, restart_count=0)]),
+        spec=Obj(node_name="node-1"),
+    )
+    service = Obj(
+        metadata=Obj(name="cockroachdb", labels={}),
+        spec=Obj(type="ClusterIP", cluster_ip="10.0.0.1", ports=[Obj(port=26257)], selector={"app": "cockroachdb"}),
+    )
+
+    class Core:
+        def list_namespaced_pod(self, namespace, label_selector):
+            assert namespace == "cockroachdb"
+            return klist([pod] if label_selector == "app=cockroachdb" else [])
+
+        def list_namespaced_service(self, namespace, label_selector=None):
+            assert namespace == "cockroachdb"
+            if label_selector is None:
+                return klist([service])
+            return klist([])
+
+        def list_namespaced_event(self, namespace, limit=25):
+            assert namespace == "cockroachdb"
+            assert limit == 25
+            return klist([])
+
+    class Apps:
+        def list_namespaced_stateful_set(self, namespace, label_selector):
+            assert namespace == "cockroachdb"
+            return klist([])
+
+    provider = object.__new__(KubernetesAPIProvider)
+    provider.namespace = "cockroachdb"
+    provider.label_selector = "app.kubernetes.io/name=cockroachdb"
+    provider.core = Core()
+    provider.apps = Apps()
+
+    status = provider.status()
+
+    assert status["configured_label_selector"] == "app.kubernetes.io/name=cockroachdb"
+    assert status["label_selector"] == "app=cockroachdb"
+    assert status["pods"][0]["name"] == "cockroachdb-abc"
+    assert status["services"][0]["name"] == "cockroachdb"

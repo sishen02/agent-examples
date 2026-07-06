@@ -94,6 +94,8 @@ class NullKubernetesProvider:
 class KubernetesAPIProvider:
     """Kubernetes API provider using the official Python client."""
 
+    LEGACY_LABEL_SELECTORS = ("app=cockroachdb",)
+
     def __init__(self, namespace: str, label_selector: str):
         from kubernetes import client, config
 
@@ -110,14 +112,25 @@ class KubernetesAPIProvider:
         self.networking = client.NetworkingV1Api()
 
     def status(self) -> dict[str, Any]:
-        pods = self.core.list_namespaced_pod(self.namespace, label_selector=self.label_selector)
-        statefulsets = self.apps.list_namespaced_stateful_set(self.namespace, label_selector=self.label_selector)
-        services = self.core.list_namespaced_service(self.namespace, label_selector=self.label_selector)
+        label_selector = self.label_selector
+        pods = self.core.list_namespaced_pod(self.namespace, label_selector=label_selector)
+        statefulsets = self.apps.list_namespaced_stateful_set(self.namespace, label_selector=label_selector)
+        if not pods.items and not statefulsets.items:
+            for fallback in self.LEGACY_LABEL_SELECTORS:
+                fallback_pods = self.core.list_namespaced_pod(self.namespace, label_selector=fallback)
+                fallback_statefulsets = self.apps.list_namespaced_stateful_set(self.namespace, label_selector=fallback)
+                if fallback_pods.items or fallback_statefulsets.items:
+                    label_selector = fallback
+                    pods = fallback_pods
+                    statefulsets = fallback_statefulsets
+                    break
+        services = self._services_for_selector(label_selector)
         events = self.core.list_namespaced_event(self.namespace, limit=25)
 
         return {
             "namespace": self.namespace,
-            "label_selector": self.label_selector,
+            "label_selector": label_selector,
+            "configured_label_selector": self.label_selector,
             "pods": [
                 {
                     "name": pod.metadata.name,
@@ -146,7 +159,7 @@ class KubernetesAPIProvider:
                     "cluster_ip": svc.spec.cluster_ip,
                     "ports": [port.port for port in svc.spec.ports or []],
                 }
-                for svc in services.items
+                for svc in services
             ],
             "events": [
                 {
@@ -160,6 +173,18 @@ class KubernetesAPIProvider:
                 for event in events.items[-25:]
             ],
         }
+
+    def _services_for_selector(self, label_selector: str):
+        metadata_matches = self.core.list_namespaced_service(self.namespace, label_selector=label_selector)
+        services_by_name = {service.metadata.name: service for service in metadata_matches.items}
+        selector_labels = _parse_simple_label_selector(label_selector)
+        if selector_labels:
+            all_services = self.core.list_namespaced_service(self.namespace)
+            for service in all_services.items:
+                service_selector = service.spec.selector or {}
+                if all(service_selector.get(key) == value for key, value in selector_labels.items()):
+                    services_by_name[service.metadata.name] = service
+        return list(services_by_name.values())
 
     def scale_statefulset(self, name: str, replicas: int) -> dict[str, Any]:
         body = {"spec": {"replicas": replicas}}
@@ -434,6 +459,26 @@ class KubernetesAPIProvider:
 
 def _command_changes_state(args: list[str]) -> bool:
     return bool(args and args[:2] == ["node", "decommission"]) or bool(args and args[0] == "init")
+
+
+def _parse_simple_label_selector(label_selector: str) -> dict[str, str]:
+    labels: dict[str, str] = {}
+    for raw_part in label_selector.split(","):
+        part = raw_part.strip()
+        if not part:
+            continue
+        if "==" in part:
+            key, value = part.split("==", 1)
+        elif "=" in part and "!=" not in part:
+            key, value = part.split("=", 1)
+        else:
+            return {}
+        key = key.strip()
+        value = value.strip()
+        if not key or not value:
+            return {}
+        labels[key] = value
+    return labels
 
 
 def _parse_underreplicated_samples(body: str) -> list[dict[str, Any]]:

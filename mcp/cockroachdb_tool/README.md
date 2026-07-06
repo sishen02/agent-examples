@@ -37,12 +37,14 @@ Operation tools from `spec.md`:
 These tools execute the named operation and return evidence. They do not enforce
 the preconditions and postconditions described in `spec.md`.
 
-## Safety Defaults
+## Safety Settings
 
-The server fails closed:
+By default, the example allows mutating tools without extra approval gates:
 
-- `MCP_READ_ONLY=true` blocks every mutating tool.
-- `REQUIRE_APPROVAL=true` requires `approved=true` for mutating tools.
+- `MCP_READ_ONLY=false` allows mutating tools.
+- `REQUIRE_APPROVAL=false` does not require `approved=true` for mutating tools.
+- Set `MCP_READ_ONLY=true` to block every mutating tool.
+- Set `REQUIRE_APPROVAL=true` to require `approved=true` for mutating tools.
 - Read-only SQL is limited to statements beginning with `SELECT`, `SHOW`, `EXPLAIN`, or `WITH`.
 - Default overview and health tools avoid `crdb_internal` metadata so they work in environments that restrict CockroachDB internal interfaces.
 
@@ -59,8 +61,8 @@ export COCKROACH_CONTAINER_NAME="cockroachdb"
 export GRPC_PORT=26257
 export HTTP_PORT=8080
 export SECURE=false
-export MCP_READ_ONLY=true
-export REQUIRE_APPROVAL=true
+export MCP_READ_ONLY=false
+export REQUIRE_APPROVAL=false
 ```
 
 Optional:
@@ -89,6 +91,17 @@ The Kind installer also applies this manifest when run with `--with-cockroachdb`
 ```bash
 uv sync
 uv run cockroachdb_tool.py
+```
+
+Use the MCP endpoint path `/mcp` without a trailing slash.
+
+The default `COCKROACH_DSN` uses Kubernetes cluster DNS and is intended for
+in-cluster deployment. When running the tool from a workstation, port-forward
+the CockroachDB SQL service and override the DSN, for example:
+
+```bash
+kubectl -n cockroachdb port-forward svc/cockroachdb 26257:26257
+export COCKROACH_DSN="postgresql://root@127.0.0.1:26257/defaultdb?sslmode=disable"
 ```
 
 The Kagenti Kind example manifest deploys a single-node insecure CockroachDB
