@@ -82,7 +82,15 @@ def _extract_final_text_from_graph_state(state: dict[str, Any]) -> str | None:
             bool(getattr(newest_message, "tool_calls", None)),
         )
         if isinstance(newest_message, AIMessage) and not getattr(newest_message, "tool_calls", None):
-            return _content_to_text(newest_message.content)
+            text = _content_to_text(newest_message.content)
+            if not text:
+                logger.warning(
+                    "Final AIMessage had no text: content_type=%s content_repr=%r response_metadata=%s",
+                    type(newest_message.content).__name__,
+                    newest_message.content,
+                    newest_message.response_metadata,
+                )
+            return text
     else:
         logger.debug("Graph completed with no messages")
     return None
