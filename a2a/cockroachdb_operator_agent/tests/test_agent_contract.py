@@ -3,14 +3,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from cockroachdb_operator_agent.agent import (
     ConversationHistory,
     _extract_final_text_from_graph_state,
     get_agent_card,
 )
-from cockroachdb_operator_agent.graph import SYSTEM_PROMPT, get_mcpclient
+from cockroachdb_operator_agent.graph import SYSTEM_PROMPT, build_finalizer_messages, get_mcpclient
 
 
 def test_agent_card_describes_cockroachdb_operator():
@@ -93,3 +93,27 @@ def test_extract_final_text_ignores_tool_call_messages():
     }
 
     assert _extract_final_text_from_graph_state(state) is None
+
+
+def test_build_finalizer_messages_removes_empty_final_assistant_message():
+    messages = [
+        HumanMessage(content="Is the cluster healthy?"),
+        AIMessage(content="", tool_calls=[]),
+    ]
+
+    finalizer_messages = build_finalizer_messages(messages)
+
+    assert isinstance(finalizer_messages[0], SystemMessage)
+    assert "previous assistant message was empty" in finalizer_messages[0].content
+    assert finalizer_messages[1:] == messages[:1]
+
+
+def test_build_finalizer_messages_keeps_nonempty_final_assistant_message():
+    messages = [
+        HumanMessage(content="Is the cluster healthy?"),
+        AIMessage(content="The cluster is healthy."),
+    ]
+
+    finalizer_messages = build_finalizer_messages(messages)
+
+    assert finalizer_messages[1:] == messages

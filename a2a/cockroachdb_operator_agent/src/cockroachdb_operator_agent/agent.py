@@ -19,7 +19,7 @@ from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes
 from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
 from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill, TaskState
 from cockroachdb_operator_agent.configuration import Configuration
-from cockroachdb_operator_agent.graph import get_graph, get_mcpclient
+from cockroachdb_operator_agent.graph import content_to_text, get_graph, get_mcpclient
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -53,23 +53,6 @@ class ConversationHistory:
 conversation_history = ConversationHistory(config.MAX_HISTORY_MESSAGES)
 
 
-def _content_to_text(content: Any) -> str | None:
-    """Return non-empty text from common LangChain message content shapes."""
-    if isinstance(content, str):
-        text = content.strip()
-        return text or None
-    if isinstance(content, list):
-        parts = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict) and isinstance(item.get("text"), str):
-                parts.append(item["text"])
-        text = "\n".join(part.strip() for part in parts if part.strip())
-        return text or None
-    return None
-
-
 def _extract_final_text_from_graph_state(state: dict[str, Any]) -> str | None:
     """Extract the final assistant text from the completed LangGraph message state."""
     messages = state.get("messages") or []
@@ -82,7 +65,7 @@ def _extract_final_text_from_graph_state(state: dict[str, Any]) -> str | None:
             bool(getattr(newest_message, "tool_calls", None)),
         )
         if isinstance(newest_message, AIMessage) and not getattr(newest_message, "tool_calls", None):
-            text = _content_to_text(newest_message.content)
+            text = content_to_text(newest_message.content)
             if not text:
                 logger.warning(
                     "Final AIMessage had no text: message=%r content_type=%s content_repr=%r response_metadata=%s",

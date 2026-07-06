@@ -1,12 +1,13 @@
 """LangGraph wiring for the CockroachDB operator agent."""
 
 import logging
+from typing import Any
 
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_openai import ChatOpenAI
-from langgraph.graph import START, MessagesState, StateGraph
-from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.graph import END, START, MessagesState, StateGraph
+from langgraph.prebuilt import ToolNode
 
 from cockroachdb_operator_agent.configuration import Configuration
 
@@ -48,6 +49,55 @@ Operating rules:
 Return concise, operator-oriented answers with evidence and next steps."""
 
 
+FINALIZER_PROMPT = """The previous assistant message was empty.
+
+Use the conversation and tool results below to produce the final user-facing answer.
+Do not call tools. Be concise, operator-oriented, and base the answer only on the
+provided evidence. If the operation requires approval or failed, say that clearly."""
+
+
+def content_to_text(content: Any) -> str | None:
+    """Return non-empty text from common LangChain message content shapes."""
+    if isinstance(content, str):
+        text = content.strip()
+        return text or None
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        text = "\n".join(part.strip() for part in parts if part.strip())
+        return text or None
+    return None
+
+
+def build_finalizer_messages(messages: list[BaseMessage]) -> list[BaseMessage]:
+    """Build a no-tools finalization prompt from completed graph messages."""
+    if messages:
+        newest_message = messages[-1]
+        if isinstance(newest_message, AIMessage) and not getattr(newest_message, "tool_calls", None):
+            if not content_to_text(newest_message.content):
+                messages = messages[:-1]
+    return [SystemMessage(content=FINALIZER_PROMPT), *messages]
+
+
+def route_after_assistant(state: MessagesState) -> str:
+    """Route to tools, finalizer, or end after the assistant node."""
+    messages = state["messages"]
+    if not messages:
+        return "finalizer"
+
+    newest_message = messages[-1]
+    if isinstance(newest_message, AIMessage):
+        if getattr(newest_message, "tool_calls", None):
+            return "tools"
+        if not content_to_text(newest_message.content):
+            return "finalizer"
+    return END
+
+
 async def get_graph(client: MultiServerMCPClient) -> StateGraph:
     """Build the graph used by the A2A executor."""
     llm = ChatOpenAI(
@@ -72,10 +122,25 @@ async def get_graph(client: MultiServerMCPClient) -> StateGraph:
         result = llm_with_tools.invoke([sys_msg] + state["messages"])
         return {"messages": [result]}
 
+    async def finalizer(state: MessagesState) -> MessagesState:
+        result = await llm.ainvoke(build_finalizer_messages(state["messages"]))
+        text = content_to_text(result.content)
+        if not text:
+            logger.warning(
+                "Finalizer also produced no text: message=%r content_type=%s content_repr=%r response_metadata=%s",
+                result,
+                type(result.content).__name__,
+                result.content,
+                result.response_metadata,
+            )
+        return {"messages": [result]}
+
     builder = StateGraph(MessagesState)
     builder.add_node("assistant", assistant)
     builder.add_node("tools", ToolNode(tools))
+    builder.add_node("finalizer", finalizer)
     builder.add_edge(START, "assistant")
-    builder.add_conditional_edges("assistant", tools_condition)
+    builder.add_conditional_edges("assistant", route_after_assistant)
     builder.add_edge("tools", "assistant")
+    builder.add_edge("finalizer", END)
     return builder.compile()
