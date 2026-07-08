@@ -121,10 +121,53 @@ def test_extract_final_text_from_streamed_update_ignores_tool_call_messages():
     assert _extract_final_text_from_graph_update(event) is None
 
 
-def test_format_graph_update_matches_intermediate_event_shape():
-    formatted = _format_graph_update({"tools": {"messages": ["tool result"]}})
+def test_format_graph_update_emits_only_tool_calls():
+    formatted = _format_graph_update(
+        {
+            "assistant": {
+                "messages": [
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": "get_cluster_status",
+                                "args": {"namespace": "cockroachdb", "cluster": "crdb"},
+                                "id": "call-1",
+                            }
+                        ],
+                    )
+                ]
+            }
+        }
+    )
 
-    assert formatted.startswith("🚶‍♂️tools: ")
+    assert formatted == 'get_cluster_status(namespace="cockroachdb", cluster="crdb")\n'
+
+
+def test_format_graph_update_ignores_tool_results_and_text_updates():
+    assert _format_graph_update({"tools": {"messages": ["very long tool result"]}}) == ""
+    assert _format_graph_update({"assistant": {"messages": [AIMessage(content="The cluster is healthy.")]}}) == ""
+
+
+def test_format_graph_update_formats_multiple_calls_and_trims_args():
+    formatted = _format_graph_update(
+        {
+            "assistant": {
+                "messages": [
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {"name": "list_database_nodes", "args": {}, "id": "call-1"},
+                            {"name": "create_backup", "args": {"database": "x" * 200}, "id": "call-2"},
+                        ],
+                    )
+                ]
+            }
+        }
+    )
+
+    assert formatted.startswith("list_database_nodes()\ncreate_backup(database=")
+    assert "xxx..." in formatted
     assert formatted.endswith("\n")
 
 

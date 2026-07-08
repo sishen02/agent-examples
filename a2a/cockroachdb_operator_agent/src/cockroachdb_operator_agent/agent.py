@@ -1,5 +1,6 @@
 """A2A server for the CockroachDB operator agent."""
 
+import json
 import logging
 import os
 from collections import defaultdict, deque
@@ -81,14 +82,45 @@ def _extract_final_text_from_graph_state(state: dict[str, Any]) -> str | None:
 
 
 def _format_graph_update(event: dict[str, Any]) -> str:
-    """Format a streamed LangGraph update for A2A intermediate status."""
-    return (
-        "\n".join(
-            f"🚶‍♂️{key}: {str(value)[:256] + '...' if len(str(value)) > 256 else str(value)}"
-            for key, value in event.items()
-        )
-        + "\n"
-    )
+    """Format only proposed tool calls from a streamed LangGraph update."""
+    calls = list(_iter_tool_calls(event))
+    if not calls:
+        return ""
+    return "\n".join(_format_tool_call(call) for call in calls) + "\n"
+
+
+def _iter_tool_calls(value: Any):
+    """Yield LangChain tool-call dictionaries from nested graph updates."""
+    if isinstance(value, AIMessage):
+        yield from getattr(value, "tool_calls", None) or []
+        return
+    if isinstance(value, dict):
+        if isinstance(value.get("name"), str) and "args" in value:
+            yield value
+            return
+        for item in value.values():
+            yield from _iter_tool_calls(item)
+        return
+    if isinstance(value, list | tuple):
+        for item in value:
+            yield from _iter_tool_calls(item)
+
+
+def _format_tool_call(call: dict[str, Any]) -> str:
+    name = call.get("name") or "tool"
+    args = call.get("args") or {}
+    if isinstance(args, dict):
+        rendered_args = ", ".join(f"{key}={_format_arg(value)}" for key, value in args.items())
+    elif isinstance(args, list | tuple):
+        rendered_args = ", ".join(_format_arg(value) for value in args)
+    else:
+        rendered_args = _format_arg(args)
+    return f"{name}({rendered_args})"
+
+
+def _format_arg(value: Any) -> str:
+    text = json.dumps(value, default=str, sort_keys=True)
+    return text if len(text) <= 120 else text[:117] + "..."
 
 
 def _extract_final_text_from_graph_update(event: dict[str, Any]) -> str | None:
@@ -204,7 +236,9 @@ class CockroachDBOperatorExecutor(AgentExecutor):
             graph_input = {"messages": conversation_history.build_turn_messages(task.context_id, user_input)}
             final_text = None
             async for event in graph.astream(graph_input, stream_mode="updates"):
-                await event_emitter.emit_event(_format_graph_update(event))
+                formatted_event = _format_graph_update(event)
+                if formatted_event:
+                    await event_emitter.emit_event(formatted_event)
                 update_final_text = _extract_final_text_from_graph_update(event)
                 if update_final_text:
                     final_text = update_final_text
