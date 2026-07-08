@@ -38,10 +38,8 @@ class KubernetesStatus(BaseModel):
 class OperationReceipt(BaseModel):
     operation: str
     status: Literal["success", "failed", "blocked"] = "success"
-    approved: bool = False
     changed: bool
     message: str
-    approval_required: bool = False
     state_before: dict[str, Any] = Field(default_factory=dict)
     state_after: dict[str, Any] = Field(default_factory=dict)
     evidence: dict[str, Any] = Field(default_factory=dict)

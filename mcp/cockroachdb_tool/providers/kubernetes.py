@@ -5,6 +5,8 @@ from datetime import timezone
 from typing import Any
 from urllib.request import urlopen
 
+from kubernetes.stream import stream
+
 
 def _iso(value: Any) -> str | None:
     if value is None:
@@ -147,30 +149,35 @@ class KubernetesAPIProvider:
         return {"changed": True, "pod": pod_name}
 
     def exec_cockroach(self, pod_name: str, container: str, args: list[str]) -> dict[str, Any]:
-        from kubernetes.stream import stream
-
         command = ["cockroach", *args]
-        response = stream(
-            self.core.connect_get_namespaced_pod_exec,
-            pod_name,
-            self.namespace,
-            container=container,
-            command=command,
-            stderr=True,
-            stdin=False,
-            stdout=True,
-            tty=False,
-            _preload_content=False,
-        )
+        try:
+            response = stream(
+                self.core.connect_get_namespaced_pod_exec,
+                pod_name,
+                self.namespace,
+                container=container,
+                command=command,
+                stderr=True,
+                stdin=False,
+                stdout=True,
+                tty=False,
+                _preload_content=False,
+            )
+        except Exception as exc:
+            return _exec_error(pod_name, container, command, exc)
         stdout = []
         stderr = []
-        while response.is_open():
-            response.update(timeout=1)
-            if response.peek_stdout():
-                stdout.append(response.read_stdout())
-            if response.peek_stderr():
-                stderr.append(response.read_stderr())
-        return_code = response.returncode
+        try:
+            while response.is_open():
+                response.update(timeout=1)
+                if response.peek_stdout():
+                    stdout.append(response.read_stdout() or "")
+                if response.peek_stderr():
+                    stderr.append(response.read_stderr() or "")
+            return_code = response.returncode
+        except Exception as exc:
+            response.close()
+            return _exec_error(pod_name, container, command, exc, stdout=stdout, stderr=stderr)
         response.close()
         return {
             "pod": pod_name,
@@ -234,6 +241,27 @@ def _command_changes_state(args: list[str]) -> bool:
     return bool(args and args[:2] == ["node", "decommission"]) or bool(args and args[0] == "init")
 
 
+def _exec_error(
+    pod_name: str,
+    container: str,
+    command: list[str],
+    exc: Exception,
+    stdout: list[str] | None = None,
+    stderr: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "pod": pod_name,
+        "container": container,
+        "command": command,
+        "stdout": "".join(stdout or []),
+        "stderr": "".join(stderr or []),
+        "exit_code": None,
+        "changed": False,
+        "error": str(exc),
+        "error_type": type(exc).__name__,
+    }
+
+
 def _parse_simple_label_selector(label_selector: str) -> dict[str, str]:
     labels: dict[str, str] = {}
     for raw_part in label_selector.split(","):
@@ -269,4 +297,3 @@ def _parse_underreplicated_samples(body: str) -> list[dict[str, Any]]:
             continue
         samples.append({"metric": name, "value": value})
     return samples
-

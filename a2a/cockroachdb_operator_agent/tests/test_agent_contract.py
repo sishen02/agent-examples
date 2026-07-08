@@ -24,12 +24,17 @@ def test_agent_card_describes_cockroachdb_operator():
     assert card.capabilities.streaming is True
     assert card.skills[0].id == "cockroachdb_operator"
     assert "cockroachdb" in card.skills[0].tags
+    assert "SQL" not in card.description
+    assert "backup creation" in card.description
 
 
-def test_system_prompt_requires_approval_for_risky_operations():
+def test_system_prompt_defines_operator_rules():
     assert "Diagnose before acting" in SYSTEM_PROMPT
-    assert "approved=true" in SYSTEM_PROMPT
     assert "not a continuous Kubernetes reconciler" in SYSTEM_PROMPT
+    assert "available CockroachDB MCP tools" in SYSTEM_PROMPT
+    assert "arbitrary SQL" in SYSTEM_PROMPT
+    assert "check_sql_connection" not in SYSTEM_PROMPT
+    assert "spec.md" not in SYSTEM_PROMPT
 
 
 def test_mcp_client_uses_cockroachdb_server(monkeypatch):
@@ -81,11 +86,11 @@ def test_extract_final_text_from_last_assistant_message():
     state = {
         "messages": [
             HumanMessage(content="Move the data"),
-            AIMessage(content="I need approval before running the migration."),
+            AIMessage(content="I need current state before running the migration."),
         ]
     }
 
-    assert _extract_final_text_from_graph_state(state) == "I need approval before running the migration."
+    assert _extract_final_text_from_graph_state(state) == "I need current state before running the migration."
 
 
 def test_extract_final_text_ignores_tool_call_messages():

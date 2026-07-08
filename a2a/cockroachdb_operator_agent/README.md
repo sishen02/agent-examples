@@ -1,13 +1,13 @@
 # CockroachDB Operator Agent
 
-A2A agent for CockroachDB SRE/DBA workflows. It uses the CockroachDB MCP tool server for deterministic inspection and approval-gated operational actions.
+A2A agent for CockroachDB SRE/DBA workflows. It uses the CockroachDB MCP tool server for deterministic inspection and operational actions.
 
 ## What It Does
 
-- Diagnoses CockroachDB health using SQL/admin metadata.
+- Diagnoses CockroachDB health using MCP tool state projections.
 - Inspects Kubernetes pods, StatefulSets, services, and events.
 - Produces evidence-based operational plans.
-- Executes risky operations only after explicit user approval and only through MCP tools.
+- Executes backup creation, scaling, node restart, node decommission, and volume expansion through MCP tools.
 
 It is not a background reconciliation controller.
 
@@ -59,6 +59,6 @@ uv run server
 Example prompts:
 
 - `Why is my CockroachDB cluster unhealthy?`
-- `Check node health and recent failed jobs.`
+- `Check node and pod health.`
 - `Plan a safe restart for pod cockroachdb-1.`
-- `I approve restarting pod cockroachdb-1.`
+- `Create a CockroachDB backup.`

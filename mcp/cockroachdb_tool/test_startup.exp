@@ -1,7 +1,7 @@
 #!/usr/bin/expect -f
 set timeout 20
 
-spawn env HOST=127.0.0.1 MCP_READ_ONLY=true REQUIRE_APPROVAL=true ENABLE_KUBERNETES=false uv run --no-sync cockroachdb_tool.py
+spawn env HOST=127.0.0.1 MCP_READ_ONLY=true ENABLE_KUBERNETES=false uv run --no-sync cockroachdb_tool.py
 expect {
     "Uvicorn running" {
         send "\003"

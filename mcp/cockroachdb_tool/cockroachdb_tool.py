@@ -44,7 +44,6 @@ class ToolSettings(BaseSettings):
     secure: bool = False
     enable_kubernetes: bool = True
     mcp_read_only: bool = False
-    require_approval: bool = False
     host: str = "0.0.0.0"
     port: int = 9090
     mcp_transport: str = "http"
@@ -85,7 +84,6 @@ def _operations() -> CockroachOperations:
         container_name=settings.cockroach_container_name,
         secure=settings.secure,
         read_only=settings.mcp_read_only,
-        require_approval=settings.require_approval,
     )
 
 
@@ -144,7 +142,6 @@ def drain_cockroach_node(
     node_id: int,
     namespace: str | None = None,
     cluster: str | None = None,
-    approved: bool = False,
 ) -> str:
     """Start CockroachDB drain/decommission protocol for one node without deleting its pod or PVC."""
     try:
@@ -153,7 +150,6 @@ def drain_cockroach_node(
                 namespace or settings.k8s_namespace,
                 cluster or settings.statefulset_name,
                 node_id,
-                approved=approved,
             )
         )
     except Exception as exc:
@@ -208,7 +204,6 @@ def restart_cockroach_node(
     node_id: int,
     namespace: str | None = None,
     cluster: str | None = None,
-    approved: bool = False,
 ) -> str:
     """Restart exactly one CockroachDB node. Does not delete PVCs or change replica count."""
     try:
@@ -217,7 +212,6 @@ def restart_cockroach_node(
                 namespace or settings.k8s_namespace,
                 cluster or settings.statefulset_name,
                 node_id,
-                approved=approved,
             )
         )
     except Exception as exc:
@@ -230,7 +224,6 @@ def scale_cockroach_cluster(
     target_replicas: int,
     namespace: str | None = None,
     cluster: str | None = None,
-    approved: bool = False,
 ) -> str:
     """Scale the CockroachDB cluster through a typed operation. Scale-down is guarded."""
     try:
@@ -239,7 +232,6 @@ def scale_cockroach_cluster(
                 namespace or settings.k8s_namespace,
                 cluster or settings.statefulset_name,
                 target_replicas,
-                approved=approved,
             )
         )
     except Exception as exc:
@@ -252,7 +244,6 @@ def decommission_cockroach_node(
     node_id: int,
     namespace: str | None = None,
     cluster: str | None = None,
-    approved: bool = False,
 ) -> str:
     """Permanently decommission one CockroachDB node without deleting PVCs."""
     try:
@@ -261,7 +252,6 @@ def decommission_cockroach_node(
                 namespace or settings.k8s_namespace,
                 cluster or settings.statefulset_name,
                 node_id,
-                approved=approved,
             )
         )
     except Exception as exc:
@@ -275,7 +265,6 @@ def expand_data_volume(
     target_size_gib: int,
     namespace: str | None = None,
     cluster: str | None = None,
-    approved: bool = False,
 ) -> str:
     """Expand one CockroachDB data PVC upward. Never deletes or recreates PVCs."""
     try:
@@ -285,7 +274,6 @@ def expand_data_volume(
                 cluster or settings.statefulset_name,
                 node_id,
                 target_size_gib,
-                approved=approved,
             )
         )
     except Exception as exc:
@@ -299,7 +287,6 @@ def create_backup(
     cluster: str | None = None,
     backup_scope: str = "cluster",
     database: str | None = None,
-    approved: bool = False,
 ) -> str:
     """Create a typed CockroachDB backup operation receipt."""
     try:
@@ -309,7 +296,6 @@ def create_backup(
                 cluster or settings.statefulset_name,
                 backup_scope=backup_scope,
                 database=database,
-                approved=approved,
             )
         )
     except Exception as exc:

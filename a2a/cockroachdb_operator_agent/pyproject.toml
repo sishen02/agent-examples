@@ -1,7 +1,7 @@
 [project]
 name = "cockroachdb-operator-agent"
 version = "0.1.0"
-description = "A2A CockroachDB operator agent using approval-gated MCP tools"
+description = "A2A CockroachDB operator agent using MCP tools"
 authors = [
     { name = "Kagenti Contributors" }
 ]
@@ -34,4 +34,3 @@ server = "cockroachdb_operator_agent.agent:run"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
-

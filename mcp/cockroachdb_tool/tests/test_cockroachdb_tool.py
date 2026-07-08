@@ -11,7 +11,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 @pytest.fixture()
 def tool_module(monkeypatch):
     monkeypatch.setenv("MCP_READ_ONLY", "true")
-    monkeypatch.setenv("REQUIRE_APPROVAL", "true")
     monkeypatch.setenv("ENABLE_KUBERNETES", "false")
     monkeypatch.delenv("COCKROACH_DSN", raising=False)
     module = importlib.import_module("cockroachdb_tool.cockroachdb_tool")
@@ -71,12 +70,10 @@ class FakeKubernetesProvider:
 
 def test_settings_allow_mutations_by_default(tool_module, monkeypatch):
     monkeypatch.delenv("MCP_READ_ONLY", raising=False)
-    monkeypatch.delenv("REQUIRE_APPROVAL", raising=False)
 
     settings = tool_module.ToolSettings()
 
     assert settings.mcp_read_only is False
-    assert settings.require_approval is False
 
 
 def test_semantic_cluster_status_and_nodes(tool_module):
@@ -108,25 +105,24 @@ def test_semantic_cluster_status_and_nodes(tool_module):
     assert node["pod_name"] == "cockroachdb-0"
 
 
-def test_semantic_restart_requires_approval(tool_module):
+def test_semantic_restart_blocks_when_read_only(tool_module):
     tool_module.cockroach_provider = FakeCockroachProvider()
     tool_module.kubernetes_provider = FakeKubernetesProvider()
 
-    result = json.loads(tool_module.restart_cockroach_node(1, "cockroachdb", "cockroachdb", approved=False))
+    result = json.loads(tool_module.restart_cockroach_node(1, "cockroachdb", "cockroachdb"))
 
     assert result["status"] == "blocked"
     assert result["changed"] is False
-    assert result["approval_required"] is True
+    assert "MCP_READ_ONLY" in result["message"]
 
 
 def test_semantic_restart_uses_node_mapping_and_does_not_scale(tool_module, monkeypatch):
     monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
-    monkeypatch.setattr(tool_module.settings, "require_approval", True)
     tool_module.cockroach_provider = FakeCockroachProvider()
     provider = FakeKubernetesProvider()
     tool_module.kubernetes_provider = provider
 
-    result = json.loads(tool_module.restart_cockroach_node(1, "cockroachdb", "cockroachdb", approved=True))
+    result = json.loads(tool_module.restart_cockroach_node(1, "cockroachdb", "cockroachdb"))
 
     assert result["status"] == "success"
     assert result["changed"] is True
@@ -136,12 +132,11 @@ def test_semantic_restart_uses_node_mapping_and_does_not_scale(tool_module, monk
 
 def test_semantic_scale_up_uses_cluster_tool(tool_module, monkeypatch):
     monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
-    monkeypatch.setattr(tool_module.settings, "require_approval", True)
     tool_module.cockroach_provider = FakeCockroachProvider()
     provider = FakeKubernetesProvider()
     tool_module.kubernetes_provider = provider
 
-    result = json.loads(tool_module.scale_cockroach_cluster(3, "cockroachdb", "cockroachdb", approved=True))
+    result = json.loads(tool_module.scale_cockroach_cluster(3, "cockroachdb", "cockroachdb"))
 
     assert result["status"] == "success"
     assert provider.scaled == [("cockroachdb", 3)]
@@ -162,12 +157,11 @@ def test_semantic_scale_down_is_guarded(tool_module, monkeypatch):
             }
 
     monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
-    monkeypatch.setattr(tool_module.settings, "require_approval", True)
     tool_module.cockroach_provider = FakeCockroachProvider()
     provider = ThreeNodeProvider()
     tool_module.kubernetes_provider = provider
 
-    result = json.loads(tool_module.scale_cockroach_cluster(2, "cockroachdb", "cockroachdb", approved=True))
+    result = json.loads(tool_module.scale_cockroach_cluster(2, "cockroachdb", "cockroachdb"))
 
     assert result["status"] == "blocked"
     assert result["changed"] is False
@@ -176,13 +170,12 @@ def test_semantic_scale_down_is_guarded(tool_module, monkeypatch):
 
 def test_semantic_volume_expansion_is_monotonic(tool_module, monkeypatch):
     monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
-    monkeypatch.setattr(tool_module.settings, "require_approval", True)
     tool_module.cockroach_provider = FakeCockroachProvider()
     provider = FakeKubernetesProvider()
     tool_module.kubernetes_provider = provider
 
-    blocked = json.loads(tool_module.expand_data_volume(1, 10, "cockroachdb", "cockroachdb", approved=True))
-    changed = json.loads(tool_module.expand_data_volume(1, 20, "cockroachdb", "cockroachdb", approved=True))
+    blocked = json.loads(tool_module.expand_data_volume(1, 10, "cockroachdb", "cockroachdb"))
+    changed = json.loads(tool_module.expand_data_volume(1, 20, "cockroachdb", "cockroachdb"))
 
     assert blocked["status"] == "blocked"
     assert blocked["changed"] is False
@@ -190,15 +183,15 @@ def test_semantic_volume_expansion_is_monotonic(tool_module, monkeypatch):
     assert provider.expanded == [(1, 20)]
 
 
-def test_semantic_create_backup_requires_approval(tool_module):
+def test_semantic_create_backup_blocks_when_read_only(tool_module):
     tool_module.cockroach_provider = FakeCockroachProvider()
     tool_module.kubernetes_provider = FakeKubernetesProvider()
 
-    result = json.loads(tool_module.create_backup("cockroachdb", "cockroachdb", approved=False))
+    result = json.loads(tool_module.create_backup("cockroachdb", "cockroachdb"))
 
     assert result["status"] == "blocked"
     assert result["backup_id"] is None
-    assert result["approval_required"] is True
+    assert "MCP_READ_ONLY" in result["message"]
 
 
 def test_node_health_avoids_internal_tables():
@@ -290,3 +283,30 @@ def test_kubernetes_status_falls_back_to_legacy_label_and_matches_service_select
     assert status["label_selector"] == "app=cockroachdb"
     assert status["pods"][0]["name"] == "cockroachdb-abc"
     assert status["services"][0]["name"] == "cockroachdb"
+
+
+def test_kubernetes_exec_returns_structured_error(monkeypatch):
+    from cockroachdb_tool.providers import kubernetes as kubernetes_provider
+    from cockroachdb_tool.providers.kubernetes import KubernetesAPIProvider
+
+    class Core:
+        def connect_get_namespaced_pod_exec(self, *args, **kwargs):
+            raise AssertionError("stream should wrap this method")
+
+    class Provider(KubernetesAPIProvider):
+        def __init__(self):
+            self.namespace = "cockroachdb"
+            self.core = Core()
+
+    def fail_stream(*args, **kwargs):
+        raise AttributeError("'NoneType' object has no attribute 'decode'")
+
+    monkeypatch.setattr(kubernetes_provider, "stream", fail_stream)
+
+    result = Provider().exec_cockroach("cockroachdb-0", "cockroachdb", ["node", "decommission", "1"])
+
+    assert result["changed"] is False
+    assert result["exit_code"] is None
+    assert result["error_type"] == "AttributeError"
+    assert "NoneType" in result["error"]
+    assert result["command"] == ["cockroach", "node", "decommission", "1"]

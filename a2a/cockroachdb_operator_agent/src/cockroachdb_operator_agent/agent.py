@@ -142,14 +142,14 @@ def get_agent_card(host: str, port: int) -> AgentCard:
     skill = AgentSkill(
         id="cockroachdb_operator",
         name="CockroachDB Operator",
-        description="Diagnose and operate CockroachDB clusters through approval-gated MCP tools.",
+        description="Diagnose and operate CockroachDB clusters through MCP tools.",
         tags=["cockroachdb", "database", "kubernetes", "sre", "dba"],
         examples=[
             "Why is my CockroachDB cluster unhealthy?",
-            "Check CockroachDB node health and recent failed jobs",
+            "Check CockroachDB node and pod health",
             "Inspect the Kubernetes status for this CockroachDB cluster",
             "Plan a safe restart for pod cockroachdb-1",
-            "Trigger a backup after I approve it",
+            "Create a CockroachDB backup",
         ],
     )
     return AgentCard(
@@ -159,12 +159,12 @@ def get_agent_card(host: str, port: int) -> AgentCard:
             Interactive SRE/DBA agent for CockroachDB operations.
 
             Capabilities:
-            - Inspect CockroachDB cluster state, node health, jobs, and SQL diagnostics
+            - Inspect CockroachDB cluster state, node health, storage, and backup status
             - Inspect Kubernetes pods, StatefulSets, services, and events
             - Produce evidence-based operational plans
-            - Execute approved backups, SQL, scaling, and pod restart actions through MCP tools
+            - Execute backup creation, scaling, node restart, node decommission, and volume expansion through MCP tools
 
-            The agent is not a continuous reconciliation controller. Risky operations require explicit approval.
+            The agent is not a continuous reconciliation controller.
             """
         ),
         supported_interfaces=[

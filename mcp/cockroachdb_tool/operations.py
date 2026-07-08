@@ -50,7 +50,6 @@ class CockroachOperations:
         container_name: str,
         secure: bool,
         read_only: bool,
-        require_approval: bool,
     ):
         self.cockroach = cockroach_provider
         self.kubernetes = kubernetes_provider
@@ -58,7 +57,6 @@ class CockroachOperations:
         self.container_name = container_name
         self.secure = secure
         self.read_only = read_only
-        self.require_approval = require_approval
 
     def get_cluster_status(self, namespace: str, cluster: str) -> dict[str, Any]:
         status = self._cluster_status_model(namespace, cluster)
@@ -106,8 +104,8 @@ class CockroachOperations:
             evidence=provider_result,
         ).model_dump()
 
-    def drain_cockroach_node(self, namespace: str, cluster: str, node_id: int, approved: bool = False) -> dict[str, Any]:
-        blocked = self._mutation_block("drain_cockroach_node", approved)
+    def drain_cockroach_node(self, namespace: str, cluster: str, node_id: int) -> dict[str, Any]:
+        blocked = self._mutation_block("drain_cockroach_node")
         if blocked:
             return DrainResult(node_id=node_id, **blocked.model_dump()).model_dump()
         node = self._node_info(node_id)
@@ -123,7 +121,6 @@ class CockroachOperations:
         return DrainResult(
             operation="drain_cockroach_node",
             status=status,
-            approved=approved,
             changed=bool(result.get("changed", True)) and status == "success",
             message="drain started" if status == "success" else "drain failed",
             node_id=node_id,
@@ -194,9 +191,8 @@ class CockroachOperations:
         namespace: str,
         cluster: str,
         node_id: int,
-        approved: bool = False,
     ) -> dict[str, Any]:
-        blocked = self._mutation_block("restart_cockroach_node", approved)
+        blocked = self._mutation_block("restart_cockroach_node")
         if blocked:
             return RestartResult(node_id=node_id, **blocked.model_dump()).model_dump()
         node = self._node_info(node_id)
@@ -207,7 +203,6 @@ class CockroachOperations:
             return RestartResult(
                 operation="restart_cockroach_node",
                 status="blocked",
-                approved=approved,
                 changed=False,
                 message="cluster is not healthy enough to restart a node",
                 node_id=node_id,
@@ -218,7 +213,6 @@ class CockroachOperations:
         return RestartResult(
             operation="restart_cockroach_node",
             status=status,
-            approved=approved,
             changed=bool(result.get("changed", False)) and status == "success",
             message="node restart requested" if status == "success" else "node restart failed",
             node_id=node_id,
@@ -232,16 +226,14 @@ class CockroachOperations:
         namespace: str,
         cluster: str,
         target_replicas: int,
-        approved: bool = False,
     ) -> dict[str, Any]:
-        blocked = self._mutation_block("scale_cockroach_cluster", approved)
+        blocked = self._mutation_block("scale_cockroach_cluster")
         if blocked:
             return ScaleResult(target_replicas=target_replicas, **blocked.model_dump()).model_dump()
         if target_replicas < 1:
             return ScaleResult(
                 operation="scale_cockroach_cluster",
                 status="failed",
-                approved=approved,
                 changed=False,
                 message="target_replicas must be at least 1",
                 target_replicas=target_replicas,
@@ -251,7 +243,6 @@ class CockroachOperations:
             return ScaleResult(
                 operation="scale_cockroach_cluster",
                 status="blocked",
-                approved=approved,
                 changed=False,
                 message="scale-down requires decommission evidence before changing replica count",
                 target_replicas=target_replicas,
@@ -262,7 +253,6 @@ class CockroachOperations:
         return ScaleResult(
             operation="scale_cockroach_cluster",
             status=status,
-            approved=approved,
             changed=bool(result.get("changed", False)) and status == "success",
             message="cluster scale requested" if status == "success" else "cluster scale failed",
             target_replicas=target_replicas,
@@ -276,9 +266,8 @@ class CockroachOperations:
         namespace: str,
         cluster: str,
         node_id: int,
-        approved: bool = False,
     ) -> dict[str, Any]:
-        blocked = self._mutation_block("decommission_cockroach_node", approved)
+        blocked = self._mutation_block("decommission_cockroach_node")
         if blocked:
             return DecommissionResult(node_id=node_id, **blocked.model_dump()).model_dump()
         node = self._node_info(node_id)
@@ -294,7 +283,6 @@ class CockroachOperations:
             return DecommissionResult(
                 operation="decommission_cockroach_node",
                 status="blocked",
-                approved=approved,
                 changed=False,
                 message="cluster health or live node count does not allow decommission",
                 node_id=node_id,
@@ -309,7 +297,6 @@ class CockroachOperations:
         return DecommissionResult(
             operation="decommission_cockroach_node",
             status=status,
-            approved=approved,
             changed=bool(result.get("changed", True)) and status == "success",
             message="node decommission requested" if status == "success" else "node decommission failed",
             node_id=node_id,
@@ -324,9 +311,8 @@ class CockroachOperations:
         cluster: str,
         node_id: int,
         target_size_gib: int,
-        approved: bool = False,
     ) -> dict[str, Any]:
-        blocked = self._mutation_block("expand_data_volume", approved)
+        blocked = self._mutation_block("expand_data_volume")
         if blocked:
             return VolumeExpansionResult(
                 node_id=node_id,
@@ -340,7 +326,6 @@ class CockroachOperations:
             return VolumeExpansionResult(
                 operation="expand_data_volume",
                 status="failed",
-                approved=approved,
                 changed=False,
                 message="current PVC size is unknown",
                 node_id=node_id,
@@ -351,7 +336,6 @@ class CockroachOperations:
             return VolumeExpansionResult(
                 operation="expand_data_volume",
                 status="blocked",
-                approved=approved,
                 changed=False,
                 message="volume expansion must be monotonic and supported by the storage class",
                 node_id=node_id,
@@ -365,7 +349,6 @@ class CockroachOperations:
         return VolumeExpansionResult(
             operation="expand_data_volume",
             status=status,
-            approved=approved,
             changed=bool(result.get("changed", False)) and status == "success",
             message="volume expansion requested" if status == "success" else "volume expansion failed",
             node_id=node_id,
@@ -381,9 +364,8 @@ class CockroachOperations:
         cluster: str,
         backup_scope: str = "cluster",
         database: str | None = None,
-        approved: bool = False,
     ) -> dict[str, Any]:
-        blocked = self._mutation_block("create_backup", approved)
+        blocked = self._mutation_block("create_backup")
         if blocked:
             data = blocked.model_dump()
             data["backup_id"] = None
@@ -400,7 +382,6 @@ class CockroachOperations:
             **OperationReceipt(
                 operation="create_backup",
                 status=status,
-                approved=approved,
                 changed=bool(result.get("changed", False)) and status == "success",
                 message="backup requested" if status == "success" else "backup failed",
                 evidence=result,
@@ -471,24 +452,13 @@ class CockroachOperations:
                 return node
         return None
 
-    def _mutation_block(self, operation: str, approved: bool) -> OperationReceipt | None:
+    def _mutation_block(self, operation: str) -> OperationReceipt | None:
         if self.read_only:
             return OperationReceipt(
                 operation=operation,
                 status="blocked",
-                approved=approved,
                 changed=False,
                 message=f"{operation} is blocked because MCP_READ_ONLY is enabled",
-                approval_required=True,
-            )
-        if self.require_approval and not approved:
-            return OperationReceipt(
-                operation=operation,
-                status="blocked",
-                approved=approved,
-                changed=False,
-                message=f"{operation} requires explicit approval",
-                approval_required=True,
             )
         return None
 

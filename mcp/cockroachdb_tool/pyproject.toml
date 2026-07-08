@@ -1,7 +1,7 @@
 [project]
 name = "cockroachdb-tool"
 version = "0.1.0"
-description = "CockroachDB operator MCP server with approval-gated operations"
+description = "CockroachDB operator MCP server with guarded operations"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -26,4 +26,3 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
-

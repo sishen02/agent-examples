@@ -1,6 +1,6 @@
 # CockroachDB MCP Tool
 
-FastMCP server for CockroachDB operations. It is designed to be used by an agent, with deterministic tool boundaries and approval-gated mutations.
+FastMCP server for CockroachDB operations. It is designed to be used by an agent, with deterministic tool boundaries and read-only runtime controls.
 
 ## Tools
 
@@ -9,14 +9,14 @@ FastMCP server for CockroachDB operations. It is designed to be used by an agent
 - `get_node_status(namespace, cluster, node_id)` - typed state for one CockroachDB node.
 - `get_storage_status(namespace, cluster)` - PVC/storage state for volume operations.
 - `get_backup_status(namespace, cluster)` - latest known backup state.
-- `drain_cockroach_node(namespace, cluster, node_id, approved)` - start drain/decommission protocol without deleting pods or PVCs.
+- `drain_cockroach_node(namespace, cluster, node_id)` - start drain/decommission protocol without deleting pods or PVCs.
 - `wait_for_node_ready(namespace, cluster, node_id, timeout_seconds)` - wait for one node to become ready.
 - `wait_for_cluster_healthy(namespace, cluster, timeout_seconds)` - wait for the cluster health projection to pass.
-- `restart_cockroach_node(namespace, cluster, node_id, approved)` - restart exactly one CockroachDB node.
-- `scale_cockroach_cluster(namespace, cluster, target_replicas, approved)` - scale the cluster through a guarded semantic operation.
-- `decommission_cockroach_node(namespace, cluster, node_id, approved)` - permanently decommission one CockroachDB node without deleting PVCs.
-- `expand_data_volume(namespace, cluster, node_id, target_size_gib, approved)` - expand one data PVC upward only.
-- `create_backup(namespace, cluster, backup_scope, database, approved)` - create a typed backup operation receipt.
+- `restart_cockroach_node(namespace, cluster, node_id)` - restart exactly one CockroachDB node.
+- `scale_cockroach_cluster(namespace, cluster, target_replicas)` - scale the cluster through a guarded semantic operation.
+- `decommission_cockroach_node(namespace, cluster, node_id)` - permanently decommission one CockroachDB node without deleting PVCs.
+- `expand_data_volume(namespace, cluster, node_id, target_size_gib)` - expand one data PVC upward only.
+- `create_backup(namespace, cluster, backup_scope, database)` - create a typed backup operation receipt.
 
 These tools return structured receipts with operation name, status, change
 flag, message, evidence, and pre/post state where relevant. They add basic
@@ -25,12 +25,10 @@ AGENT-C/runtime-verification layer for full temporal policy checking.
 
 ## Safety Settings
 
-By default, the example allows mutating tools without extra approval gates:
+By default, the example allows mutating tools:
 
 - `MCP_READ_ONLY=false` allows mutating tools.
-- `REQUIRE_APPROVAL=false` does not require `approved=true` for mutating tools.
 - Set `MCP_READ_ONLY=true` to block every mutating tool.
-- Set `REQUIRE_APPROVAL=true` to require `approved=true` for mutating tools.
 
 ## Configuration
 
@@ -46,7 +44,6 @@ export GRPC_PORT=26257
 export HTTP_PORT=8080
 export SECURE=false
 export MCP_READ_ONLY=false
-export REQUIRE_APPROVAL=false
 ```
 
 Optional:
