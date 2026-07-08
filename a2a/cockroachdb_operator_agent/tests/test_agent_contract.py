@@ -3,7 +3,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from cockroachdb_operator_agent.agent import (
     ConversationHistory,
@@ -144,12 +144,23 @@ def test_format_graph_update_emits_only_tool_calls():
     assert formatted == 'get_cluster_status(namespace="cockroachdb", cluster="crdb")\n'
 
 
-def test_format_graph_update_ignores_tool_results_and_text_updates():
-    assert _format_graph_update({"tools": {"messages": ["very long tool result"]}}) == ""
+def test_format_graph_update_emits_tool_results_and_ignores_text_updates():
+    formatted = _format_graph_update(
+        {
+            "tools": {
+                "messages": [
+                    ToolMessage(content='{"status":"success"}', name="get_cluster_status", tool_call_id="call-1")
+                ]
+            }
+        }
+    )
+
+    assert formatted == 'get_cluster_status -> "{\\"status\\":\\"success\\"}"\n'
     assert _format_graph_update({"assistant": {"messages": [AIMessage(content="The cluster is healthy.")]}}) == ""
 
 
-def test_format_graph_update_formats_multiple_calls_and_trims_args():
+def test_format_graph_update_formats_multiple_calls_without_trimming_args():
+    long_value = "x" * 200
     formatted = _format_graph_update(
         {
             "assistant": {
@@ -158,7 +169,7 @@ def test_format_graph_update_formats_multiple_calls_and_trims_args():
                         content="",
                         tool_calls=[
                             {"name": "list_database_nodes", "args": {}, "id": "call-1"},
-                            {"name": "create_backup", "args": {"database": "x" * 200}, "id": "call-2"},
+                            {"name": "create_backup", "args": {"database": long_value}, "id": "call-2"},
                         ],
                     )
                 ]
@@ -167,7 +178,8 @@ def test_format_graph_update_formats_multiple_calls_and_trims_args():
     )
 
     assert formatted.startswith("list_database_nodes()\ncreate_backup(database=")
-    assert "xxx..." in formatted
+    assert long_value in formatted
+    assert "..." not in formatted
     assert formatted.endswith("\n")
 
 

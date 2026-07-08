@@ -8,7 +8,7 @@ from textwrap import dedent
 from typing import Any
 
 import uvicorn
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from openinference.instrumentation.langchain import LangChainInstrumentor
 from starlette.applications import Starlette
 
@@ -82,28 +82,31 @@ def _extract_final_text_from_graph_state(state: dict[str, Any]) -> str | None:
 
 
 def _format_graph_update(event: dict[str, Any]) -> str:
-    """Format only proposed tool calls from a streamed LangGraph update."""
-    calls = list(_iter_tool_calls(event))
-    if not calls:
+    """Format tool calls and tool results from a streamed LangGraph update."""
+    lines = list(_iter_tool_events(event))
+    if not lines:
         return ""
-    return "\n".join(_format_tool_call(call) for call in calls) + "\n"
+    return "\n".join(lines) + "\n"
 
 
-def _iter_tool_calls(value: Any):
-    """Yield LangChain tool-call dictionaries from nested graph updates."""
+def _iter_tool_events(value: Any):
     if isinstance(value, AIMessage):
-        yield from getattr(value, "tool_calls", None) or []
+        for call in getattr(value, "tool_calls", None) or []:
+            yield _format_tool_call(call)
+        return
+    if isinstance(value, ToolMessage):
+        yield f"{value.name or 'tool'} -> {_format_arg(value.content)}"
         return
     if isinstance(value, dict):
         if isinstance(value.get("name"), str) and "args" in value:
-            yield value
+            yield _format_tool_call(value)
             return
         for item in value.values():
-            yield from _iter_tool_calls(item)
+            yield from _iter_tool_events(item)
         return
     if isinstance(value, list | tuple):
         for item in value:
-            yield from _iter_tool_calls(item)
+            yield from _iter_tool_events(item)
 
 
 def _format_tool_call(call: dict[str, Any]) -> str:
@@ -119,8 +122,7 @@ def _format_tool_call(call: dict[str, Any]) -> str:
 
 
 def _format_arg(value: Any) -> str:
-    text = json.dumps(value, default=str, sort_keys=True)
-    return text if len(text) <= 120 else text[:117] + "..."
+    return json.dumps(value, default=str, sort_keys=True)
 
 
 def _extract_final_text_from_graph_update(event: dict[str, Any]) -> str | None:
