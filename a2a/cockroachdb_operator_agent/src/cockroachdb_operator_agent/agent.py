@@ -21,6 +21,7 @@ from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
 from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill, TaskState
 from cockroachdb_operator_agent.configuration import Configuration
 from cockroachdb_operator_agent.graph import content_to_text, get_graph, get_mcpclient
+from cockroachdb_operator_agent.trajectory import TrajectoryRecorder
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -219,16 +220,30 @@ class CockroachDBOperatorExecutor(AgentExecutor):
         event_emitter = A2AEvent(task_updater)
 
         user_input = context.get_user_input()
+        trajectory = TrajectoryRecorder(
+            output_dir=config.TRAJECTORY_DIR,
+            task_id=task.id,
+            context_id=task.context_id,
+            user_input=user_input or "",
+            agent_version=config.AGENT_VERSION,
+            enabled=config.TRAJECTORY_ENABLED,
+        )
         if not user_input or not user_input.strip():
-            await event_emitter.emit_event("Error: Empty input provided", failed=True)
+            message = "Error: Empty input provided"
+            trajectory.finish(status="failed", final_text=message)
+            self._write_trajectory(trajectory)
+            await event_emitter.emit_event(message, failed=True)
             return
 
         mcpclient = get_mcpclient()
+        final_text = None
         try:
             try:
                 tools = await mcpclient.get_tools()
                 logger.info("Connected to CockroachDB MCP tools: %s", [tool.name for tool in tools])
+                trajectory.record_mcp_connection(success=True, tools=[tool.name for tool in tools])
             except Exception as tool_error:
+                trajectory.record_mcp_connection(success=False, error=tool_error)
                 await event_emitter.emit_event(
                     f"Warning: Cannot connect to CockroachDB MCP service at {config.MCP_URL}. "
                     f"The agent can explain the intended workflow but cannot inspect live state. Error: {tool_error}",
@@ -236,9 +251,9 @@ class CockroachDBOperatorExecutor(AgentExecutor):
 
             graph = await get_graph(mcpclient)
             graph_input = {"messages": conversation_history.build_turn_messages(task.context_id, user_input)}
-            final_text = None
             async for event in graph.astream(graph_input, stream_mode="updates"):
                 formatted_event = _format_graph_update(event)
+                trajectory.record_graph_update(event, formatted_event=formatted_event)
                 if formatted_event:
                     await event_emitter.emit_event(formatted_event)
                 update_final_text = _extract_final_text_from_graph_update(event)
@@ -250,14 +265,28 @@ class CockroachDBOperatorExecutor(AgentExecutor):
                 logger.warning("Graph completed without a final assistant answer")
                 final_text = "Task completed without a final answer."
             conversation_history.record_turn(task.context_id, user_input, final_text)
+            trajectory.finish(status="success", final_text=final_text)
             await event_emitter.emit_event(final_text, final=True)
         except Exception as exc:
             logger.exception("CockroachDB operator execution failed")
-            await event_emitter.emit_event(f"Error: Failed to process CockroachDB request. {exc}", failed=True)
+            final_text = f"Error: Failed to process CockroachDB request. {exc}"
+            trajectory.finish(status="failed", final_text=final_text, error=exc)
+            await event_emitter.emit_event(final_text, failed=True)
             raise
+        finally:
+            self._write_trajectory(trajectory)
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         raise Exception("cancel not supported")
+
+    @staticmethod
+    def _write_trajectory(trajectory: TrajectoryRecorder) -> None:
+        try:
+            path = trajectory.write()
+            if path:
+                logger.info("Wrote trajectory file %s", path)
+        except Exception:
+            logger.exception("Failed to write trajectory file")
 
 
 def run():

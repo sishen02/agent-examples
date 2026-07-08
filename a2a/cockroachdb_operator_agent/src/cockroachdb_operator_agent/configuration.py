@@ -12,4 +12,6 @@ class Configuration(BaseSettings):
     MCP_TIMEOUT: int = 600
     MAX_EVENT_DISPLAY_LENGTH: int = 384
     MAX_HISTORY_MESSAGES: int = 20
+    TRAJECTORY_ENABLED: bool = True
+    TRAJECTORY_DIR: str = "/shared/trajectories"
     AGENT_VERSION: str = "1.0.0"

@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from cockroachdb_operator_agent.agent import (
     get_agent_card,
 )
 from cockroachdb_operator_agent.graph import SYSTEM_PROMPT, build_finalizer_messages, get_mcpclient
+from cockroachdb_operator_agent.trajectory import TrajectoryRecorder
 
 
 def test_agent_card_describes_cockroachdb_operator():
@@ -205,3 +207,81 @@ def test_build_finalizer_messages_keeps_nonempty_final_assistant_message():
     finalizer_messages = build_finalizer_messages(messages)
 
     assert finalizer_messages[1:] == messages
+
+
+def test_trajectory_recorder_writes_successful_turn(tmp_path):
+    recorder = TrajectoryRecorder(
+        output_dir=str(tmp_path),
+        task_id="task-1",
+        context_id="ctx-1",
+        user_input="Inspect the cluster",
+        agent_version="test",
+    )
+    recorder.record_mcp_connection(success=True, tools=["get_cluster_status"])
+    recorder.record_graph_update(
+        {
+            "assistant": {
+                "messages": [
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": "get_cluster_status",
+                                "args": {"namespace": "cockroachdb"},
+                                "id": "call-1",
+                            }
+                        ],
+                    )
+                ]
+            }
+        },
+        formatted_event='get_cluster_status(namespace="cockroachdb")\n',
+    )
+    recorder.record_graph_update(
+        {
+            "tools": {
+                "messages": [
+                    ToolMessage(content='{"status":"success"}', name="get_cluster_status", tool_call_id="call-1")
+                ]
+            }
+        },
+        formatted_event='get_cluster_status -> "{\\"status\\":\\"success\\"}"\n',
+    )
+    recorder.finish(status="success", final_text="The cluster is healthy.")
+
+    path = recorder.write()
+    data = json.loads(path.read_text())
+
+    assert data["metadata"]["status"] == "success"
+    assert data["input"]["text"] == "Inspect the cluster"
+    assert data["mcp_connection"]["tools"] == ["get_cluster_status"]
+    assert data["final"]["text"] == "The cluster is healthy."
+    assert [event["type"] for event in data["tool_events"]] == ["tool_call", "tool_result"]
+    assert data["tool_events"][0]["args"] == {"namespace": "cockroachdb"}
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_trajectory_recorder_writes_failure_with_fallback_serialization(tmp_path):
+    recorder = TrajectoryRecorder(
+        output_dir=str(tmp_path),
+        task_id="task/with spaces",
+        context_id="ctx/with spaces",
+        user_input="Inspect the cluster",
+        agent_version="test",
+    )
+    error = RuntimeError("connection refused")
+    recorder.record_mcp_connection(success=False, error=error)
+    recorder.record_graph_update({"assistant": {"non_serializable": object()}})
+    recorder.finish(status="failed", final_text="Request failed.", error=error)
+
+    path = recorder.write()
+    data = json.loads(path.read_text())
+
+    assert "/" not in path.name
+    assert data["metadata"]["status"] == "failed"
+    assert data["mcp_connection"]["error"] == {
+        "type": "RuntimeError",
+        "message": "connection refused",
+    }
+    assert data["error"] == {"type": "RuntimeError", "message": "connection refused"}
+    assert "object object" in data["events"][0]["raw"]["assistant"]["non_serializable"]

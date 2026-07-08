@@ -88,7 +88,7 @@ kubectl -n cockroachdb port-forward svc/cockroachdb 26257:26257
 export COCKROACH_DSN="postgresql://root@127.0.0.1:26257/defaultdb?sslmode=disable"
 ```
 
-The Kagenti Kind example manifest deploys a single-node insecure CockroachDB
+The Kagenti Kind example manifest deploys a three-node insecure CockroachDB
 StatefulSet in the `cockroachdb` namespace with service name `cockroachdb`.
-It is still a single-node `start-single-node` example; increasing StatefulSet
-replicas does not create a valid multi-node CockroachDB cluster.
+The StatefulSet uses stable pod DNS names for node discovery and the Kind
+startup script initializes the cluster after rollout.

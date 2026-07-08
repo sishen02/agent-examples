@@ -19,15 +19,35 @@ Template env files are provided:
 - `.env.vllm` - local VLLM config
 
 ```bash
-export MCP_URL="http://cockroachdb-tool-mcp.cockroachdb.svc.cluster.local:8000/mcp"
+export MCP_URL="http://cockroach-db-tool-mcp.team1.svc.cluster.local:9090/mcp"
 export MCP_TRANSPORT="streamable_http"
 export LLM_MODEL="llama3.2:3b-instruct-fp16"
 export LLM_API_BASE="http://172.19.0.1:8000/v1"
 export LLM_API_KEY="api-key"
+export TRAJECTORY_ENABLED=true
+export TRAJECTORY_DIR=/shared/trajectories
 ```
 
 Conversation history is held in memory per A2A `context_id` and bounded by
 `MAX_HISTORY_MESSAGES`. A pod restart clears this history.
+
+## Trajectory Files
+
+Each request writes one JSON trajectory file when `TRAJECTORY_ENABLED=true`.
+The file includes the user input, MCP connection check, streamed graph updates,
+tool calls, tool results, the final assistant text, and error details when a
+request fails.
+
+For persistence across pod restarts, deploy this agent as a StatefulSet with
+persistent storage enabled. Kagenti mounts that storage at `/shared`, so the
+default trajectory directory is `/shared/trajectories`.
+
+Inspect or copy saved trajectories with:
+
+```bash
+kubectl exec -n team1 statefulset/cockroach-db-agent -- ls -lah /shared/trajectories
+kubectl cp team1/cockroach-db-agent-0:/shared/trajectories ./trajectories
+```
 
 ## Run
 
