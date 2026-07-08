@@ -4,38 +4,24 @@ FastMCP server for CockroachDB operations. It is designed to be used by an agent
 
 ## Tools
 
-General diagnostics:
+- `get_cluster_status(namespace, cluster)` - typed cluster health and readiness projection.
+- `list_database_nodes(namespace, cluster)` - typed node/pod state.
+- `get_node_status(namespace, cluster, node_id)` - typed state for one CockroachDB node.
+- `get_storage_status(namespace, cluster)` - PVC/storage state for volume operations.
+- `get_backup_status(namespace, cluster)` - latest known backup state.
+- `drain_cockroach_node(namespace, cluster, node_id, approved)` - start drain/decommission protocol without deleting pods or PVCs.
+- `wait_for_node_ready(namespace, cluster, node_id, timeout_seconds)` - wait for one node to become ready.
+- `wait_for_cluster_healthy(namespace, cluster, timeout_seconds)` - wait for the cluster health projection to pass.
+- `restart_cockroach_node(namespace, cluster, node_id, approved)` - restart exactly one CockroachDB node.
+- `scale_cockroach_cluster(namespace, cluster, target_replicas, approved)` - scale the cluster through a guarded semantic operation.
+- `decommission_cockroach_node(namespace, cluster, node_id, approved)` - permanently decommission one CockroachDB node without deleting PVCs.
+- `expand_data_volume(namespace, cluster, node_id, target_size_gib, approved)` - expand one data PVC upward only.
+- `create_backup(namespace, cluster, backup_scope, database, approved)` - create a typed backup operation receipt.
 
-- `get_cluster_overview()` - CockroachDB version and databases using safe SQL metadata.
-- `get_node_health()` - SQL reachability using safe SQL metadata.
-- `list_jobs(status, limit)` - recent CockroachDB jobs.
-- `get_kubernetes_status()` - pods, StatefulSets, services, and recent events.
-- `run_sql(query, max_rows, approved)` - diagnostic SQL by default; mutating SQL requires approval.
-- `trigger_backup(destination, approved)` - starts a backup.
-- `scale_statefulset(name, replicas, approved)` - scales a CockroachDB StatefulSet.
-- `restart_pod(pod_name, approved)` - restarts a pod by deleting it.
-
-Operation tools from `spec.md`:
-
-- `check_sql_connection()` - SQL `SELECT 1` connection probe.
-- `get_cluster_setting(setting_name)` and `set_cluster_setting(setting_name, value, approved)` - `SHOW/SET CLUSTER SETTING`.
-- `read_zone_config(target_type, target_name, max_rows)` - reads `crdb_internal.zones`.
-- `probe_metrics_health(...)` - reads `/_status/vars` from CockroachDB pods.
-- `run_cockroach_init(...)` - runs `cockroach init`.
-- `discover_node_id(...)` - runs `cockroach node status --format=csv`.
-- `start_node_decommission(...)` - runs `cockroach node decommission --wait=none`.
-- `get_decommission_status(...)` - runs `cockroach node status <node-id> --decommission --format=csv`.
-- `finalize_node_decommission(...)` - runs final `cockroach node decommission`.
-- `get_start_config(...)` - returns pod/StatefulSet start configuration evidence.
-- `get_membership_evidence(...)` - returns desired pod ordinal evidence.
-- `shrink_statefulset(...)` - patches StatefulSet replicas.
-- `get_rollout_evidence(...)` - returns StatefulSet/pod rollout evidence.
-- `cleanup_restart_annotation(...)` - removes a restart annotation.
-- `sync_ingress_host(...)` - creates, updates, or deletes an Ingress.
-- `run_version_check_job(...)` - runs a CockroachDB image version-check Job.
-
-These tools execute the named operation and return evidence. They do not enforce
-the preconditions and postconditions described in `spec.md`.
+These tools return structured receipts with operation name, status, change
+flag, message, evidence, and pre/post state where relevant. They add basic
+server-side guards, but they are still designed to be paired with an external
+AGENT-C/runtime-verification layer for full temporal policy checking.
 
 ## Safety Settings
 
@@ -45,8 +31,6 @@ By default, the example allows mutating tools without extra approval gates:
 - `REQUIRE_APPROVAL=false` does not require `approved=true` for mutating tools.
 - Set `MCP_READ_ONLY=true` to block every mutating tool.
 - Set `REQUIRE_APPROVAL=true` to require `approved=true` for mutating tools.
-- Read-only SQL is limited to statements beginning with `SELECT`, `SHOW`, `EXPLAIN`, or `WITH`.
-- Default overview and health tools avoid `crdb_internal` metadata so they work in environments that restrict CockroachDB internal interfaces.
 
 ## Configuration
 

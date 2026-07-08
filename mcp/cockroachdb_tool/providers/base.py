@@ -10,31 +10,8 @@ class CockroachProvider(Protocol):
     def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> dict[str, Any]:
         """Run a mutating SQL/admin statement."""
 
-    def cluster_overview(self) -> dict[str, Any]:
-        """Return a compact cluster overview."""
-
     def node_health(self) -> dict[str, Any]:
         """Return node health/status details."""
-
-    def jobs(self, status: str | None = None, limit: int = 25) -> dict[str, Any]:
-        """Return recent jobs."""
-
-    def sql_connect(self) -> dict[str, Any]:
-        """Run a SQL connection probe."""
-
-    def get_cluster_setting(self, setting_name: str) -> dict[str, Any]:
-        """Read a cluster setting."""
-
-    def set_cluster_setting(self, setting_name: str, value: str) -> dict[str, Any]:
-        """Write a cluster setting."""
-
-    def read_zone_config(
-        self,
-        target_type: str | None = None,
-        target_name: str | None = None,
-        max_rows: int = 100,
-    ) -> dict[str, Any]:
-        """Read zone config metadata."""
 
 
 class KubernetesProvider(Protocol):

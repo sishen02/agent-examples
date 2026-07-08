@@ -29,36 +29,23 @@ class FakeCockroachProvider:
         self.executed.append((sql, params))
         return {"changed": True, "row_count": 1}
 
-    def cluster_overview(self):
-        return {"source": "sql", "nodes": [{"node_id": 1}], "databases": ["defaultdb"]}
-
     def node_health(self):
-        return {"nodes": [{"node_id": 1, "is_live": True}], "range_summary": []}
-
-    def jobs(self, status=None, limit=25):
-        return {"jobs": [{"status": status or "running"}]}
-
-    def sql_connect(self):
-        return {"operation": "check_sql_connection", "sql_available": True}
-
-    def get_cluster_setting(self, setting_name):
-        return {"setting_name": setting_name, "rows": [{"value": "1"}]}
-
-    def set_cluster_setting(self, setting_name, value):
-        self.executed.append(("set_cluster_setting", setting_name, value))
-        return {"changed": True, "setting_name": setting_name, "value": value}
-
-    def read_zone_config(self, target_type=None, target_name=None, max_rows=100):
-        return {"rows": [{"target_type": target_type, "target_name": target_name}], "row_count": 1}
+        return {"sql_available": True, "nodes": [{"node_id": 1, "is_live": True}], "range_summary": []}
 
 
 class FakeKubernetesProvider:
     def __init__(self):
         self.scaled = []
         self.restarted = []
+        self.expanded = []
 
     def status(self):
-        return {"pods": [{"name": "crdb-0"}], "statefulsets": [], "services": [], "events": []}
+        return {
+            "pods": [{"name": "cockroachdb-0", "ready": True, "node_name": "worker-1"}],
+            "statefulsets": [{"name": "cockroachdb", "replicas": 1, "ready_replicas": 1}],
+            "services": [],
+            "events": [],
+        }
 
     def scale_statefulset(self, name, replicas):
         self.scaled.append((name, replicas))
@@ -72,37 +59,14 @@ class FakeKubernetesProvider:
         return {"pod": pod_name, "container": container, "command": ["cockroach", *args], "exit_code": 0}
 
     def metrics_health(self, **kwargs):
-        return {"pods": [{"pod": "crdb-0", "ok": True}], "all_ok": True, "kwargs": kwargs}
+        return {"pods": [{"pod": "cockroachdb-0", "ok": True, "ranges_underreplicated": []}], "all_ok": True, "kwargs": kwargs}
 
-    def start_config(self, pod_name=None, statefulset_name=None):
-        return {"pod": pod_name, "statefulset": statefulset_name}
+    def storage_status(self):
+        return {"volumes": [{"node_id": 1, "size_gib": 10, "allows_expansion": True}]}
 
-    def membership_evidence(self, statefulset_name, desired_replicas):
-        return {"statefulset": statefulset_name, "desired_replicas": desired_replicas}
-
-    def rollout_evidence(self, statefulset_name, partition=None, desired_image=None):
-        return {"statefulset": statefulset_name, "partition": partition, "desired_image": desired_image}
-
-    def cleanup_restart_annotation(self, resource_name, annotation_key, expected_value=None):
-        return {"changed": True, "resource": resource_name, "annotation_key": annotation_key}
-
-    def sync_ingress_host(self, name, host, service_name, service_port, tls_secret_name=None, path="/"):
-        return {"changed": True, "ingress": name, "host": host}
-
-    def delete_ingress(self, name):
-        return {"changed": True, "ingress": name, "deleted": True}
-
-    def version_check_job(self, job_name, image, expected_version=None, timeout_seconds=120, delete_after=True):
-        return {"changed": True, "job": job_name, "image": image, "expected_version": expected_version}
-
-
-def test_read_only_sql_is_allowed(tool_module):
-    tool_module.cockroach_provider = FakeCockroachProvider()
-
-    result = json.loads(tool_module.run_sql("SHOW DATABASES"))
-
-    assert result["row_count"] == 1
-    assert result["rows"] == [{"ok": True}]
+    def expand_data_volume(self, node_id, target_size_gib):
+        self.expanded.append((node_id, target_size_gib))
+        return {"changed": True, "node_id": node_id, "target_size_gib": target_size_gib}
 
 
 def test_settings_allow_mutations_by_default(tool_module, monkeypatch):
@@ -115,117 +79,126 @@ def test_settings_allow_mutations_by_default(tool_module, monkeypatch):
     assert settings.require_approval is False
 
 
-def test_mutating_sql_requires_approval(tool_module):
+def test_semantic_cluster_status_and_nodes(tool_module):
     tool_module.cockroach_provider = FakeCockroachProvider()
-
-    result = json.loads(tool_module.run_sql("ALTER TABLE foo ADD COLUMN bar STRING", approved=False))
-
-    assert result["changed"] is False
-    assert result["approval_required"] is True
-    assert "blocked" in result["error"]
-
-
-def test_mutating_sql_runs_when_not_read_only_and_approved(tool_module, monkeypatch):
-    monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
-    monkeypatch.setattr(tool_module.settings, "require_approval", True)
-    provider = FakeCockroachProvider()
-    tool_module.cockroach_provider = provider
-
-    result = json.loads(tool_module.run_sql("ALTER TABLE foo ADD COLUMN bar STRING", approved=True))
-
-    assert result["changed"] is True
-    assert provider.executed == [("ALTER TABLE foo ADD COLUMN bar STRING", None)]
-
-
-def test_scale_statefulset_requires_approval(tool_module):
     tool_module.kubernetes_provider = FakeKubernetesProvider()
 
-    result = json.loads(tool_module.scale_statefulset("cockroachdb", 3, approved=False))
+    status = json.loads(tool_module.get_cluster_status("cockroachdb", "cockroachdb"))
+    nodes = json.loads(tool_module.list_database_nodes("cockroachdb", "cockroachdb"))
+    node = json.loads(tool_module.get_node_status(1, "cockroachdb", "cockroachdb"))
 
+    assert status["cluster_phase"] == "Ready"
+    assert status["desired_replicas"] == 1
+    assert status["ready_replicas"] == 1
+    assert status["live_cockroach_nodes"] == 1
+    assert nodes == [
+        {
+            "node_id": 1,
+            "pod_name": "cockroachdb-0",
+            "kubernetes_node": "worker-1",
+            "pod_ready": True,
+            "cockroach_live": True,
+            "draining": False,
+            "decommissioning": False,
+            "disk_used_percent": None,
+            "version": None,
+        }
+    ]
+    assert node["exists"] is True
+    assert node["pod_name"] == "cockroachdb-0"
+
+
+def test_semantic_restart_requires_approval(tool_module):
+    tool_module.cockroach_provider = FakeCockroachProvider()
+    tool_module.kubernetes_provider = FakeKubernetesProvider()
+
+    result = json.loads(tool_module.restart_cockroach_node(1, "cockroachdb", "cockroachdb", approved=False))
+
+    assert result["status"] == "blocked"
     assert result["changed"] is False
     assert result["approval_required"] is True
 
 
-def test_scale_statefulset_runs_when_approved(tool_module, monkeypatch):
+def test_semantic_restart_uses_node_mapping_and_does_not_scale(tool_module, monkeypatch):
     monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
     monkeypatch.setattr(tool_module.settings, "require_approval", True)
+    tool_module.cockroach_provider = FakeCockroachProvider()
     provider = FakeKubernetesProvider()
     tool_module.kubernetes_provider = provider
 
-    result = json.loads(tool_module.scale_statefulset("cockroachdb", 3, approved=True))
+    result = json.loads(tool_module.restart_cockroach_node(1, "cockroachdb", "cockroachdb", approved=True))
 
+    assert result["status"] == "success"
     assert result["changed"] is True
+    assert provider.restarted == ["cockroachdb-0"]
+    assert provider.scaled == []
+
+
+def test_semantic_scale_up_uses_cluster_tool(tool_module, monkeypatch):
+    monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
+    monkeypatch.setattr(tool_module.settings, "require_approval", True)
+    tool_module.cockroach_provider = FakeCockroachProvider()
+    provider = FakeKubernetesProvider()
+    tool_module.kubernetes_provider = provider
+
+    result = json.loads(tool_module.scale_cockroach_cluster(3, "cockroachdb", "cockroachdb", approved=True))
+
+    assert result["status"] == "success"
     assert provider.scaled == [("cockroachdb", 3)]
 
 
-def test_read_only_sql_classifier(tool_module):
-    assert tool_module._is_read_only_sql(" select 1")
-    assert tool_module._is_read_only_sql("SHOW JOBS")
-    assert tool_module._is_read_only_sql("EXPLAIN SELECT 1")
-    assert not tool_module._is_read_only_sql("UPDATE foo SET bar = 1")
+def test_semantic_scale_down_is_guarded(tool_module, monkeypatch):
+    class ThreeNodeProvider(FakeKubernetesProvider):
+        def status(self):
+            return {
+                "pods": [
+                    {"name": "cockroachdb-0", "ready": True, "node_name": "worker-1"},
+                    {"name": "cockroachdb-1", "ready": True, "node_name": "worker-2"},
+                    {"name": "cockroachdb-2", "ready": True, "node_name": "worker-3"},
+                ],
+                "statefulsets": [{"name": "cockroachdb", "replicas": 3, "ready_replicas": 3}],
+                "services": [],
+                "events": [],
+            }
 
-
-def test_spec_named_sql_tools(tool_module, monkeypatch):
-    provider = FakeCockroachProvider()
-    tool_module.cockroach_provider = provider
     monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
     monkeypatch.setattr(tool_module.settings, "require_approval", True)
+    tool_module.cockroach_provider = FakeCockroachProvider()
+    provider = ThreeNodeProvider()
+    tool_module.kubernetes_provider = provider
 
-    assert json.loads(tool_module.check_sql_connection())["sql_available"] is True
-    assert json.loads(tool_module.get_cluster_setting("cluster.organization"))["setting_name"] == "cluster.organization"
-    assert json.loads(tool_module.read_zone_config("DATABASE", "defaultdb"))["row_count"] == 1
+    result = json.loads(tool_module.scale_cockroach_cluster(2, "cockroachdb", "cockroachdb", approved=True))
 
-    blocked = json.loads(tool_module.set_cluster_setting("kv.snapshot_rebalance.max_rate", "1MiB", approved=False))
-    assert blocked["approval_required"] is True
-
-    changed = json.loads(tool_module.set_cluster_setting("kv.snapshot_rebalance.max_rate", "1MiB", approved=True))
-    assert changed["changed"] is True
-    assert provider.executed == [("set_cluster_setting", "kv.snapshot_rebalance.max_rate", "1MiB")]
+    assert result["status"] == "blocked"
+    assert result["changed"] is False
+    assert provider.scaled == []
 
 
-def test_spec_named_kubernetes_tools(tool_module, monkeypatch):
+def test_semantic_volume_expansion_is_monotonic(tool_module, monkeypatch):
+    monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
+    monkeypatch.setattr(tool_module.settings, "require_approval", True)
+    tool_module.cockroach_provider = FakeCockroachProvider()
     provider = FakeKubernetesProvider()
     tool_module.kubernetes_provider = provider
-    monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
-    monkeypatch.setattr(tool_module.settings, "require_approval", True)
-    monkeypatch.setattr(tool_module.settings, "statefulset_name", "cockroachdb")
 
-    assert json.loads(tool_module.probe_metrics_health())["passes"][0]["all_ok"] is True
-    assert json.loads(tool_module.discover_node_id(target_host="cockroachdb-0"))["exit_code"] == 0
-    assert json.loads(tool_module.get_start_config())["statefulset"] == "cockroachdb"
-    assert json.loads(tool_module.get_membership_evidence(desired_replicas=3))["desired_replicas"] == 3
-    assert json.loads(tool_module.get_rollout_evidence(partition=0))["partition"] == 0
+    blocked = json.loads(tool_module.expand_data_volume(1, 10, "cockroachdb", "cockroachdb", approved=True))
+    changed = json.loads(tool_module.expand_data_volume(1, 20, "cockroachdb", "cockroachdb", approved=True))
 
-    blocked = json.loads(tool_module.start_node_decommission(2, approved=False))
-    assert blocked["approval_required"] is True
-
-    changed = json.loads(tool_module.start_node_decommission(2, approved=True))
-    assert changed["approved"] is True
-    assert changed["exit_code"] == 0
+    assert blocked["status"] == "blocked"
+    assert blocked["changed"] is False
+    assert changed["status"] == "success"
+    assert provider.expanded == [(1, 20)]
 
 
-def test_cluster_overview_avoids_internal_tables():
-    from cockroachdb_tool.providers.sql import CockroachSQLProvider
+def test_semantic_create_backup_requires_approval(tool_module):
+    tool_module.cockroach_provider = FakeCockroachProvider()
+    tool_module.kubernetes_provider = FakeKubernetesProvider()
 
-    class RecordingProvider(CockroachSQLProvider):
-        def __init__(self):
-            self.queries = []
+    result = json.loads(tool_module.create_backup("cockroachdb", "cockroachdb", approved=False))
 
-        def query(self, sql, params=None, max_rows=100):
-            self.queries.append(sql)
-            if "version()" in sql:
-                return {"rows": [{"version": "CockroachDB test"}]}
-            if "SHOW DATABASES" in sql:
-                return {"rows": [{"database_name": "defaultdb"}]}
-            return {"rows": []}
-
-    provider = RecordingProvider()
-    result = provider.cluster_overview()
-
-    assert result["source"] == "sql_safe"
-    assert result["nodes"] == []
-    assert result["databases"] == ["defaultdb"]
-    assert "crdb_internal" not in "\n".join(provider.queries)
+    assert result["status"] == "blocked"
+    assert result["backup_id"] is None
+    assert result["approval_required"] is True
 
 
 def test_node_health_avoids_internal_tables():

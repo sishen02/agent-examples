@@ -18,7 +18,7 @@ class SQLResult(BaseModel):
 
 
 class ClusterOverview(BaseModel):
-    source: Literal["sql", "unconfigured"]
+    source: Literal["sql", "sql_safe", "unconfigured"]
     cluster_id: str | None = None
     organization: str | None = None
     version: str | None = None
@@ -37,8 +37,90 @@ class KubernetesStatus(BaseModel):
 
 class OperationReceipt(BaseModel):
     operation: str
-    approved: bool
+    status: Literal["success", "failed", "blocked"] = "success"
+    approved: bool = False
     changed: bool
     message: str
+    approval_required: bool = False
+    state_before: dict[str, Any] = Field(default_factory=dict)
+    state_after: dict[str, Any] = Field(default_factory=dict)
+    evidence: dict[str, Any] = Field(default_factory=dict)
     details: dict[str, Any] = Field(default_factory=dict)
 
+
+class ClusterStatus(BaseModel):
+    namespace: str
+    cluster: str
+    cluster_phase: Literal["Ready", "Degraded", "Reconciling", "Unknown"] = "Unknown"
+    desired_replicas: int = 0
+    ready_replicas: int = 0
+    live_cockroach_nodes: int = 0
+    unavailable_ranges: int = 0
+    under_replicated_ranges: int = 0
+    sql_ready: bool = False
+    operator_ready: bool = False
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+
+class NodeInfo(BaseModel):
+    node_id: int
+    pod_name: str
+    kubernetes_node: str | None = None
+    pod_ready: bool = False
+    cockroach_live: bool = False
+    draining: bool = False
+    decommissioning: bool = False
+    disk_used_percent: float | None = None
+    version: str | None = None
+
+
+class NodeStatus(NodeInfo):
+    namespace: str
+    cluster: str
+    exists: bool = True
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+
+class StorageStatus(BaseModel):
+    namespace: str
+    cluster: str
+    volumes: list[dict[str, Any]] = Field(default_factory=list)
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+
+class BackupStatus(BaseModel):
+    namespace: str
+    cluster: str
+    latest_successful_backup_time: str | None = None
+    backup_location: str | None = None
+    recent_enough: bool = False
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+
+class WaitResult(OperationReceipt):
+    timed_out: bool = False
+
+
+class DrainResult(OperationReceipt):
+    node_id: int
+
+
+class RestartResult(OperationReceipt):
+    node_id: int
+
+
+class ScaleResult(OperationReceipt):
+    target_replicas: int
+
+
+class DecommissionResult(OperationReceipt):
+    node_id: int
+
+
+class VolumeExpansionResult(OperationReceipt):
+    node_id: int
+    target_size_gib: int
+
+
+class BackupResult(OperationReceipt):
+    backup_id: str | None = None
