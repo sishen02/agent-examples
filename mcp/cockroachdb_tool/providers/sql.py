@@ -15,6 +15,9 @@ class NullCockroachProvider:
     def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> dict[str, Any]:
         return {"error": self.reason, "sql": sql, "changed": False}
 
+    def create_backup(self, backup_scope: str, database: str | None, backup_id: str) -> dict[str, Any]:
+        return {"error": self.reason, "backup_id": backup_id, "changed": False}
+
     def node_health(self) -> dict[str, Any]:
         return {"error": self.reason, "nodes": []}
 
@@ -22,9 +25,10 @@ class NullCockroachProvider:
 class CockroachSQLProvider:
     """CockroachDB SQL/Admin API provider using psycopg."""
 
-    def __init__(self, dsn: str, connect_timeout: int = 10):
+    def __init__(self, dsn: str, connect_timeout: int = 10, backup_destination: str = "nodelocal://1/cockroachdb-tool"):
         self.dsn = dsn
         self.connect_timeout = connect_timeout
+        self.backup_destination = backup_destination.rstrip("/")
 
     def _connect(self):
         import psycopg
@@ -49,6 +53,32 @@ class CockroachSQLProvider:
                 row_count = cur.rowcount if cur.rowcount is not None and cur.rowcount >= 0 else 0
             conn.commit()
         return {"changed": True, "row_count": row_count}
+
+    def create_backup(self, backup_scope: str, database: str | None, backup_id: str) -> dict[str, Any]:
+        from psycopg import sql
+
+        destination = f"{self.backup_destination}/{backup_id}"
+        if backup_scope == "database" and database:
+            statement = sql.SQL("BACKUP DATABASE {} INTO {} WITH detached").format(
+                sql.Identifier(database),
+                sql.Literal(destination),
+            )
+        else:
+            statement = sql.SQL("BACKUP INTO {} WITH detached").format(sql.Literal(destination))
+
+        with self._connect() as conn:
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                cur.execute(statement)
+                rows = cur.fetchall() if cur.description else []
+                columns = [desc.name for desc in cur.description] if cur.description else []
+        return {
+            "changed": True,
+            "backup_id": backup_id,
+            "destination": destination,
+            "columns": columns,
+            "rows": rows,
+        }
 
     def node_health(self) -> dict[str, Any]:
         sql_probe = self.query("SELECT 1 AS sql_available, now() AS checked_at", max_rows=1)

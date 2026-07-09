@@ -36,11 +36,12 @@ Use `.env.template` as the reference for tool runtime environment variables.
 
 ```bash
 export COCKROACH_DSN="postgresql://root@cockroachdb.cockroachdb.svc.cluster.local:26257/defaultdb?sslmode=disable"
+export BACKUP_DESTINATION="nodelocal://1/cockroachdb-tool"
 export K8S_NAMESPACE="cockroachdb"
 export COCKROACH_LABEL_SELECTOR="app.kubernetes.io/name=cockroachdb"
 export STATEFULSET_NAME="cockroachdb"
 export COCKROACH_CONTAINER_NAME="cockroachdb"
-export GRPC_PORT=26257
+export GRPC_PORT=26357
 export HTTP_PORT=8080
 export SECURE=false
 export MCP_READ_ONLY=false

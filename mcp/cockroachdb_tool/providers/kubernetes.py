@@ -186,7 +186,7 @@ class KubernetesAPIProvider:
             "stdout": "".join(stdout),
             "stderr": "".join(stderr),
             "exit_code": return_code,
-            "changed": _command_changes_state(args),
+            "changed": return_code == 0 and _command_changes_state(args),
         }
 
     def metrics_health(

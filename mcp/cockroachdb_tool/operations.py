@@ -48,6 +48,7 @@ class CockroachOperations:
         *,
         statefulset_name: str,
         container_name: str,
+        grpc_port: int,
         secure: bool,
         read_only: bool,
     ):
@@ -55,6 +56,7 @@ class CockroachOperations:
         self.kubernetes = kubernetes_provider
         self.statefulset_name = statefulset_name
         self.container_name = container_name
+        self.grpc_port = grpc_port
         self.secure = secure
         self.read_only = read_only
 
@@ -115,7 +117,14 @@ class CockroachOperations:
         result = self.kubernetes.exec_cockroach(
             self._exec_pod_name(),
             self.container_name,
-            ["node", "decommission", str(node_id), "--wait=none", self._secure_flag()],
+            [
+                "node",
+                "decommission",
+                str(node_id),
+                "--wait=none",
+                self._secure_flag(),
+                self._node_rpc_host_flag(namespace),
+            ],
         )
         status = "success" if self._provider_ok(result) else "failed"
         return DrainResult(
@@ -291,7 +300,7 @@ class CockroachOperations:
         result = self.kubernetes.exec_cockroach(
             self._exec_pod_name(),
             self.container_name,
-            ["node", "decommission", str(node_id), self._secure_flag()],
+            ["node", "decommission", str(node_id), self._secure_flag(), self._node_rpc_host_flag(namespace)],
         )
         status = "success" if self._provider_ok(result) else "failed"
         return DecommissionResult(
@@ -373,10 +382,7 @@ class CockroachOperations:
         backup_id = f"{cluster}-{uuid4().hex[:8]}"
         result = self._call_optional("create_backup", backup_scope, database, backup_id)
         if result is None:
-            if backup_scope == "database" and database:
-                result = self.cockroach.execute("BACKUP DATABASE %s INTO LATEST IN %s", (database, backup_id))
-            else:
-                result = self.cockroach.execute("BACKUP INTO %s", (backup_id,))
+            result = {"error": "provider does not implement create_backup", "backup_id": backup_id, "changed": False}
         status = "success" if self._provider_ok(result) else "failed"
         return {
             **OperationReceipt(
@@ -527,6 +533,10 @@ class CockroachOperations:
 
     def _exec_pod_name(self) -> str:
         return f"{self.statefulset_name}-0"
+
+    def _node_rpc_host_flag(self, namespace: str) -> str:
+        host = f"{self._exec_pod_name()}.{self.statefulset_name}.{namespace}.svc.cluster.local:{self.grpc_port}"
+        return f"--host={host}"
 
     def _secure_flag(self) -> str:
         return "--secure" if self.secure else "--insecure"

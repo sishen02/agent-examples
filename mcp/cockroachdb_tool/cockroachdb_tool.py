@@ -39,7 +39,8 @@ class ToolSettings(BaseSettings):
     cockroach_label_selector: str = "app.kubernetes.io/name=cockroachdb"
     statefulset_name: str = "cockroachdb"
     cockroach_container_name: str = "cockroachdb"
-    grpc_port: int = 26257
+    backup_destination: str = "nodelocal://1/cockroachdb-tool"
+    grpc_port: int = 26357
     http_port: int = 8080
     secure: bool = False
     enable_kubernetes: bool = True
@@ -59,7 +60,11 @@ def _json(data: dict[str, Any] | list[Any]) -> str:
 def _build_cockroach_provider():
     if not settings.cockroach_dsn:
         return NullCockroachProvider()
-    return CockroachSQLProvider(settings.cockroach_dsn, connect_timeout=settings.connect_timeout)
+    return CockroachSQLProvider(
+        settings.cockroach_dsn,
+        connect_timeout=settings.connect_timeout,
+        backup_destination=settings.backup_destination,
+    )
 
 
 def _build_kubernetes_provider():
@@ -82,6 +87,7 @@ def _operations() -> CockroachOperations:
         kubernetes_provider,
         statefulset_name=settings.statefulset_name,
         container_name=settings.cockroach_container_name,
+        grpc_port=settings.grpc_port,
         secure=settings.secure,
         read_only=settings.mcp_read_only,
     )

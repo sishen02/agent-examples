@@ -37,6 +37,7 @@ class FakeKubernetesProvider:
         self.scaled = []
         self.restarted = []
         self.expanded = []
+        self.execs = []
 
     def status(self):
         return {
@@ -55,6 +56,7 @@ class FakeKubernetesProvider:
         return {"changed": True, "pod": pod_name}
 
     def exec_cockroach(self, pod_name, container, args):
+        self.execs.append((pod_name, container, args))
         return {"pod": pod_name, "container": container, "command": ["cockroach", *args], "exit_code": 0}
 
     def metrics_health(self, **kwargs):
@@ -128,6 +130,31 @@ def test_semantic_restart_uses_node_mapping_and_does_not_scale(tool_module, monk
     assert result["changed"] is True
     assert provider.restarted == ["cockroachdb-0"]
     assert provider.scaled == []
+
+
+def test_semantic_drain_uses_rpc_host_for_node_decommission(tool_module, monkeypatch):
+    monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
+    tool_module.cockroach_provider = FakeCockroachProvider()
+    provider = FakeKubernetesProvider()
+    tool_module.kubernetes_provider = provider
+
+    result = json.loads(tool_module.drain_cockroach_node(1, "cockroachdb", "cockroachdb"))
+
+    assert result["status"] == "success"
+    assert provider.execs == [
+        (
+            "cockroachdb-0",
+            "cockroachdb",
+            [
+                "node",
+                "decommission",
+                "1",
+                "--wait=none",
+                "--insecure",
+                "--host=cockroachdb-0.cockroachdb.cockroachdb.svc.cluster.local:26357",
+            ],
+        )
+    ]
 
 
 def test_semantic_scale_up_uses_cluster_tool(tool_module, monkeypatch):
@@ -215,6 +242,61 @@ def test_node_health_avoids_internal_tables():
     assert result["nodes"] == []
     assert result["range_summary"] == []
     assert "crdb_internal" not in "\n".join(provider.queries)
+
+
+def test_create_backup_uses_autocommit_and_detached():
+    from cockroachdb_tool.providers.sql import CockroachSQLProvider
+
+    class Cursor:
+        description = []
+
+        def __init__(self):
+            self.statement = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def execute(self, statement):
+            self.statement = statement
+
+        def fetchall(self):
+            return []
+
+    class Conn:
+        def __init__(self):
+            self.autocommit = False
+            self.cursor_obj = Cursor()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def cursor(self):
+            return self.cursor_obj
+
+    class Provider(CockroachSQLProvider):
+        def __init__(self):
+            super().__init__("postgresql://root@example/defaultdb", backup_destination="nodelocal://1/test-backups")
+            self.conn = Conn()
+
+        def _connect(self):
+            return self.conn
+
+    provider = Provider()
+
+    result = provider.create_backup("cluster", None, "backup-1")
+
+    assert provider.conn.autocommit is True
+    statement = str(provider.conn.cursor_obj.statement)
+    assert "BACKUP INTO" in statement
+    assert "WITH detached" in statement
+    assert result["changed"] is True
+    assert result["destination"] == "nodelocal://1/test-backups/backup-1"
 
 
 def test_parse_simple_label_selector():
@@ -310,3 +392,33 @@ def test_kubernetes_exec_returns_structured_error(monkeypatch):
     assert result["error_type"] == "AttributeError"
     assert "NoneType" in result["error"]
     assert result["command"] == ["cockroach", "node", "decommission", "1"]
+
+
+def test_kubernetes_exec_failed_mutating_command_reports_unchanged(monkeypatch):
+    from cockroachdb_tool.providers import kubernetes as kubernetes_provider
+    from cockroachdb_tool.providers.kubernetes import KubernetesAPIProvider
+
+    class Core:
+        def connect_get_namespaced_pod_exec(self, *args, **kwargs):
+            raise AssertionError("stream should wrap this method")
+
+    class Response:
+        returncode = 1
+
+        def is_open(self):
+            return False
+
+        def close(self):
+            return None
+
+    class Provider(KubernetesAPIProvider):
+        def __init__(self):
+            self.namespace = "cockroachdb"
+            self.core = Core()
+
+    monkeypatch.setattr(kubernetes_provider, "stream", lambda *args, **kwargs: Response())
+
+    result = Provider().exec_cockroach("cockroachdb-0", "cockroachdb", ["node", "decommission", "1"])
+
+    assert result["exit_code"] == 1
+    assert result["changed"] is False
