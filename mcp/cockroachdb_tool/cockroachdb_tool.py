@@ -40,7 +40,7 @@ class ToolSettings(BaseSettings):
     statefulset_name: str = "cockroachdb"
     cockroach_container_name: str = "cockroachdb"
     backup_destination: str = "nodelocal://1/cockroachdb-tool"
-    grpc_port: int = 26357
+    grpc_port: int = 26257
     http_port: int = 8080
     secure: bool = False
     enable_kubernetes: bool = True
