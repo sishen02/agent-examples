@@ -52,7 +52,6 @@ class CockroachOperations:
         container_name: str,
         grpc_port: int,
         secure: bool,
-        read_only: bool,
     ):
         self.cockroach = cockroach_provider
         self.kubernetes = kubernetes_provider
@@ -60,7 +59,6 @@ class CockroachOperations:
         self.container_name = container_name
         self.grpc_port = grpc_port
         self.secure = secure
-        self.read_only = read_only
 
     def get_cluster_status(self, namespace: str, cluster: str) -> dict[str, Any]:
         status = self._cluster_status_model(namespace, cluster)
@@ -109,9 +107,6 @@ class CockroachOperations:
         ).model_dump()
 
     def drain_cockroach_node(self, namespace: str, cluster: str, node_id: int) -> dict[str, Any]:
-        blocked = self._mutation_block("drain_cockroach_node")
-        if blocked:
-            return DrainResult(node_id=node_id, **blocked.model_dump()).model_dump()
         state_before = self._cluster_status_model(namespace, cluster).model_dump()
         result = self.kubernetes.exec_cockroach(
             self._exec_pod_name(),
@@ -200,9 +195,6 @@ class CockroachOperations:
         cluster: str,
         node_id: int,
     ) -> dict[str, Any]:
-        blocked = self._mutation_block("restart_cockroach_node")
-        if blocked:
-            return RestartResult(node_id=node_id, **blocked.model_dump()).model_dump()
         pod_name = self._pod_name_for_node(node_id)
         result = self.kubernetes.restart_pod(pod_name)
         status = "success" if self._provider_ok(result) else "failed"
@@ -217,9 +209,6 @@ class CockroachOperations:
         ).model_dump()
 
     def delete_cockroach_pod(self, namespace: str, cluster: str, pod_name: str) -> dict[str, Any]:
-        blocked = self._mutation_block("delete_cockroach_pod")
-        if blocked:
-            return PodDeleteResult(pod_name=pod_name, **blocked.model_dump()).model_dump()
         result = self.kubernetes.delete_pod(pod_name)
         status = "success" if self._provider_ok(result) else "failed"
         return PodDeleteResult(
@@ -238,9 +227,6 @@ class CockroachOperations:
         cluster: str,
         target_replicas: int,
     ) -> dict[str, Any]:
-        blocked = self._mutation_block("scale_cockroach_cluster")
-        if blocked:
-            return ScaleResult(target_replicas=target_replicas, **blocked.model_dump()).model_dump()
         if target_replicas < 1:
             return ScaleResult(
                 operation="scale_cockroach_cluster",
@@ -269,9 +255,6 @@ class CockroachOperations:
         cluster: str,
         node_id: int,
     ) -> dict[str, Any]:
-        blocked = self._mutation_block("decommission_cockroach_node")
-        if blocked:
-            return DecommissionResult(node_id=node_id, **blocked.model_dump()).model_dump()
         state_before = self._cluster_status_model(namespace, cluster)
         result = self.kubernetes.exec_cockroach(
             self._exec_pod_name(),
@@ -297,13 +280,6 @@ class CockroachOperations:
         node_id: int,
         target_size_gib: int,
     ) -> dict[str, Any]:
-        blocked = self._mutation_block("expand_data_volume")
-        if blocked:
-            return VolumeExpansionResult(
-                node_id=node_id,
-                target_size_gib=target_size_gib,
-                **blocked.model_dump(),
-            ).model_dump()
         result = self._call_optional("expand_data_volume", node_id, target_size_gib)
         if result is None:
             result = {"error": "provider does not implement expand_data_volume", "changed": False}
@@ -326,11 +302,6 @@ class CockroachOperations:
         backup_scope: str = "cluster",
         database: str | None = None,
     ) -> dict[str, Any]:
-        blocked = self._mutation_block("create_backup")
-        if blocked:
-            data = blocked.model_dump()
-            data["backup_id"] = None
-            return data
         backup_id = f"{cluster}-{uuid4().hex[:8]}"
         result = self._call_optional("create_backup", backup_scope, database, backup_id)
         if result is None:
@@ -408,16 +379,6 @@ class CockroachOperations:
         for node in self._node_infos():
             if node.node_id == node_id:
                 return node
-        return None
-
-    def _mutation_block(self, operation: str) -> OperationReceipt | None:
-        if self.read_only:
-            return OperationReceipt(
-                operation=operation,
-                status="blocked",
-                changed=False,
-                message=f"{operation} is blocked because MCP_READ_ONLY is enabled",
-            )
         return None
 
     def _safe_call(self, fn: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:

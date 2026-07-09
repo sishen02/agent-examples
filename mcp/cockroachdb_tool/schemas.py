@@ -37,7 +37,7 @@ class KubernetesStatus(BaseModel):
 
 class OperationReceipt(BaseModel):
     operation: str
-    status: Literal["success", "failed", "blocked"] = "success"
+    status: Literal["success", "failed"] = "success"
     changed: bool
     message: str
     state_before: dict[str, Any] = Field(default_factory=dict)

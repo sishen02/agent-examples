@@ -1,6 +1,6 @@
 # CockroachDB MCP Tool
 
-FastMCP server for CockroachDB operations. It is designed to be used by an agent, with deterministic tool boundaries and read-only runtime controls.
+FastMCP server for CockroachDB operations. It is designed to be used by an agent, with deterministic tool boundaries.
 
 ## Tools
 
@@ -20,17 +20,8 @@ FastMCP server for CockroachDB operations. It is designed to be used by an agent
 - `create_backup(namespace, cluster, backup_scope, database)` - create a typed backup operation receipt.
 
 These tools return structured receipts with operation name, status, change
-flag, message, evidence, and pre/post state where relevant. Mutating tools
-perform the requested action directly when runtime write access is enabled;
-the agent or external runtime-verification layer is responsible for temporal
-policy decisions.
-
-## Safety Settings
-
-By default, the example allows mutating tools:
-
-- `MCP_READ_ONLY=false` allows mutating tools.
-- Set `MCP_READ_ONLY=true` to block every mutating tool.
+flag, message, evidence, and pre/post state where relevant. The agent or
+external runtime-verification layer is responsible for temporal policy decisions.
 
 ## Configuration
 
@@ -46,7 +37,6 @@ export COCKROACH_CONTAINER_NAME="cockroachdb"
 export GRPC_PORT=26357
 export HTTP_PORT=8080
 export SECURE=false
-export MCP_READ_ONLY=false
 ```
 
 Optional:

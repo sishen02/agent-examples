@@ -10,7 +10,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 @pytest.fixture()
 def tool_module(monkeypatch):
-    monkeypatch.setenv("MCP_READ_ONLY", "true")
     monkeypatch.setenv("ENABLE_KUBERNETES", "false")
     monkeypatch.delenv("COCKROACH_DSN", raising=False)
     module = importlib.import_module("cockroachdb_tool.cockroachdb_tool")
@@ -74,14 +73,6 @@ class FakeKubernetesProvider:
         return {"changed": True, "node_id": node_id, "target_size_gib": target_size_gib}
 
 
-def test_settings_allow_mutations_by_default(tool_module, monkeypatch):
-    monkeypatch.delenv("MCP_READ_ONLY", raising=False)
-
-    settings = tool_module.ToolSettings()
-
-    assert settings.mcp_read_only is False
-
-
 def test_semantic_cluster_status_and_nodes(tool_module):
     tool_module.cockroach_provider = FakeCockroachProvider()
     tool_module.kubernetes_provider = FakeKubernetesProvider()
@@ -111,19 +102,7 @@ def test_semantic_cluster_status_and_nodes(tool_module):
     assert node["pod_name"] == "cockroachdb-0"
 
 
-def test_semantic_restart_blocks_when_read_only(tool_module):
-    tool_module.cockroach_provider = FakeCockroachProvider()
-    tool_module.kubernetes_provider = FakeKubernetesProvider()
-
-    result = json.loads(tool_module.restart_cockroach_node(1, "cockroachdb", "cockroachdb"))
-
-    assert result["status"] == "blocked"
-    assert result["changed"] is False
-    assert "MCP_READ_ONLY" in result["message"]
-
-
 def test_semantic_restart_uses_node_mapping_and_does_not_scale(tool_module, monkeypatch):
-    monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
     tool_module.cockroach_provider = FakeCockroachProvider()
     provider = FakeKubernetesProvider()
     tool_module.kubernetes_provider = provider
@@ -146,7 +125,6 @@ def test_semantic_restart_does_not_block_on_cluster_health(tool_module, monkeypa
                 "events": [],
             }
 
-    monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
     tool_module.cockroach_provider = FakeCockroachProvider()
     provider = UnhealthyProvider()
     tool_module.kubernetes_provider = provider
@@ -159,7 +137,6 @@ def test_semantic_restart_does_not_block_on_cluster_health(tool_module, monkeypa
 
 
 def test_delete_cockroach_pod_deletes_named_pod(tool_module, monkeypatch):
-    monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
     tool_module.cockroach_provider = FakeCockroachProvider()
     provider = FakeKubernetesProvider()
     tool_module.kubernetes_provider = provider
@@ -173,7 +150,6 @@ def test_delete_cockroach_pod_deletes_named_pod(tool_module, monkeypatch):
 
 
 def test_semantic_drain_uses_rpc_host_for_node_decommission(tool_module, monkeypatch):
-    monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
     tool_module.cockroach_provider = FakeCockroachProvider()
     provider = FakeKubernetesProvider()
     tool_module.kubernetes_provider = provider
@@ -198,7 +174,6 @@ def test_semantic_drain_uses_rpc_host_for_node_decommission(tool_module, monkeyp
 
 
 def test_semantic_drain_does_not_block_when_node_is_absent_from_status(tool_module, monkeypatch):
-    monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
     tool_module.cockroach_provider = FakeCockroachProvider()
     provider = FakeKubernetesProvider()
     tool_module.kubernetes_provider = provider
@@ -210,7 +185,6 @@ def test_semantic_drain_does_not_block_when_node_is_absent_from_status(tool_modu
 
 
 def test_semantic_scale_up_uses_cluster_tool(tool_module, monkeypatch):
-    monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
     tool_module.cockroach_provider = FakeCockroachProvider()
     provider = FakeKubernetesProvider()
     tool_module.kubernetes_provider = provider
@@ -235,7 +209,6 @@ def test_semantic_scale_down_calls_cluster_tool(tool_module, monkeypatch):
                 "events": [],
             }
 
-    monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
     tool_module.cockroach_provider = FakeCockroachProvider()
     provider = ThreeNodeProvider()
     tool_module.kubernetes_provider = provider
@@ -257,7 +230,6 @@ def test_semantic_decommission_does_not_block_on_cluster_health(tool_module, mon
                 "events": [],
             }
 
-    monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
     tool_module.cockroach_provider = FakeCockroachProvider()
     provider = UnhealthyProvider()
     tool_module.kubernetes_provider = provider
@@ -281,7 +253,6 @@ def test_semantic_decommission_does_not_block_on_cluster_health(tool_module, mon
 
 
 def test_semantic_volume_expansion_calls_provider_without_storage_precheck(tool_module, monkeypatch):
-    monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
     tool_module.cockroach_provider = FakeCockroachProvider()
     provider = FakeKubernetesProvider()
     tool_module.kubernetes_provider = provider
@@ -293,15 +264,15 @@ def test_semantic_volume_expansion_calls_provider_without_storage_precheck(tool_
     assert provider.expanded == [(1, 10)]
 
 
-def test_semantic_create_backup_blocks_when_read_only(tool_module):
+def test_semantic_create_backup_calls_provider(tool_module):
     tool_module.cockroach_provider = FakeCockroachProvider()
     tool_module.kubernetes_provider = FakeKubernetesProvider()
 
     result = json.loads(tool_module.create_backup("cockroachdb", "cockroachdb"))
 
-    assert result["status"] == "blocked"
+    assert result["status"] == "failed"
     assert result["backup_id"] is None
-    assert "MCP_READ_ONLY" in result["message"]
+    assert result["evidence"]["error"] == "provider does not implement create_backup"
 
 
 def test_node_health_avoids_internal_tables():

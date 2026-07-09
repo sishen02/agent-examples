@@ -44,7 +44,6 @@ class ToolSettings(BaseSettings):
     http_port: int = 8080
     secure: bool = False
     enable_kubernetes: bool = True
-    mcp_read_only: bool = False
     host: str = "0.0.0.0"
     port: int = 9090
     mcp_transport: str = "http"
@@ -89,7 +88,6 @@ def _operations() -> CockroachOperations:
         container_name=settings.cockroach_container_name,
         grpc_port=settings.grpc_port,
         secure=settings.secure,
-        read_only=settings.mcp_read_only,
     )
 
 
