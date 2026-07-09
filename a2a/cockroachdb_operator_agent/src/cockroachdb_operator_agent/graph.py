@@ -105,7 +105,8 @@ async def get_graph(client: MultiServerMCPClient) -> StateGraph:
         model=config.LLM_MODEL,
         api_key=config.LLM_API_KEY,
         base_url=config.LLM_API_BASE,
-        temperature=0,
+        temperature=0.6,
+        max_completion_tokens=1024,
     )
 
     try:
