@@ -107,6 +107,10 @@ class RestartResult(OperationReceipt):
     node_id: int
 
 
+class PodDeleteResult(OperationReceipt):
+    pod_name: str
+
+
 class ScaleResult(OperationReceipt):
     target_replicas: int
 

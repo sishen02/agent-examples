@@ -15,6 +15,7 @@ try:
         NodeInfo,
         NodeStatus,
         OperationReceipt,
+        PodDeleteResult,
         RestartResult,
         ScaleResult,
         StorageStatus,
@@ -30,6 +31,7 @@ except ImportError:
         NodeInfo,
         NodeStatus,
         OperationReceipt,
+        PodDeleteResult,
         RestartResult,
         ScaleResult,
         StorageStatus,
@@ -110,9 +112,6 @@ class CockroachOperations:
         blocked = self._mutation_block("drain_cockroach_node")
         if blocked:
             return DrainResult(node_id=node_id, **blocked.model_dump()).model_dump()
-        node = self._node_info(node_id)
-        if node is None:
-            return self._failed_node_result(DrainResult, "drain_cockroach_node", node_id, "node does not exist")
         state_before = self._cluster_status_model(namespace, cluster).model_dump()
         result = self.kubernetes.exec_cockroach(
             self._exec_pod_name(),
@@ -204,20 +203,8 @@ class CockroachOperations:
         blocked = self._mutation_block("restart_cockroach_node")
         if blocked:
             return RestartResult(node_id=node_id, **blocked.model_dump()).model_dump()
-        node = self._node_info(node_id)
-        if node is None:
-            return self._failed_node_result(RestartResult, "restart_cockroach_node", node_id, "node does not exist")
-        state_before = self._cluster_status_model(namespace, cluster)
-        if not self._cluster_healthy(state_before):
-            return RestartResult(
-                operation="restart_cockroach_node",
-                status="blocked",
-                changed=False,
-                message="cluster is not healthy enough to restart a node",
-                node_id=node_id,
-                state_before=state_before.model_dump(),
-            ).model_dump()
-        result = self.kubernetes.restart_pod(node.pod_name)
+        pod_name = self._pod_name_for_node(node_id)
+        result = self.kubernetes.restart_pod(pod_name)
         status = "success" if self._provider_ok(result) else "failed"
         return RestartResult(
             operation="restart_cockroach_node",
@@ -225,7 +212,22 @@ class CockroachOperations:
             changed=bool(result.get("changed", False)) and status == "success",
             message="node restart requested" if status == "success" else "node restart failed",
             node_id=node_id,
-            state_before=state_before.model_dump(),
+            state_after=self._cluster_status_model(namespace, cluster).model_dump(),
+            evidence=result,
+        ).model_dump()
+
+    def delete_cockroach_pod(self, namespace: str, cluster: str, pod_name: str) -> dict[str, Any]:
+        blocked = self._mutation_block("delete_cockroach_pod")
+        if blocked:
+            return PodDeleteResult(pod_name=pod_name, **blocked.model_dump()).model_dump()
+        result = self.kubernetes.delete_pod(pod_name)
+        status = "success" if self._provider_ok(result) else "failed"
+        return PodDeleteResult(
+            operation="delete_cockroach_pod",
+            status=status,
+            changed=bool(result.get("changed", False)) and status == "success",
+            message="pod deletion requested" if status == "success" else "pod deletion failed",
+            pod_name=pod_name,
             state_after=self._cluster_status_model(namespace, cluster).model_dump(),
             evidence=result,
         ).model_dump()
@@ -248,15 +250,6 @@ class CockroachOperations:
                 target_replicas=target_replicas,
             ).model_dump()
         state_before = self._cluster_status_model(namespace, cluster)
-        if target_replicas < state_before.desired_replicas:
-            return ScaleResult(
-                operation="scale_cockroach_cluster",
-                status="blocked",
-                changed=False,
-                message="scale-down requires decommission evidence before changing replica count",
-                target_replicas=target_replicas,
-                state_before=state_before.model_dump(),
-            ).model_dump()
         result = self.kubernetes.scale_statefulset(self.statefulset_name, target_replicas)
         status = "success" if self._provider_ok(result) else "failed"
         return ScaleResult(
@@ -279,24 +272,7 @@ class CockroachOperations:
         blocked = self._mutation_block("decommission_cockroach_node")
         if blocked:
             return DecommissionResult(node_id=node_id, **blocked.model_dump()).model_dump()
-        node = self._node_info(node_id)
-        if node is None:
-            return self._failed_node_result(
-                DecommissionResult,
-                "decommission_cockroach_node",
-                node_id,
-                "node does not exist",
-            )
         state_before = self._cluster_status_model(namespace, cluster)
-        if not self._cluster_healthy(state_before) or state_before.live_cockroach_nodes <= 1:
-            return DecommissionResult(
-                operation="decommission_cockroach_node",
-                status="blocked",
-                changed=False,
-                message="cluster health or live node count does not allow decommission",
-                node_id=node_id,
-                state_before=state_before.model_dump(),
-            ).model_dump()
         result = self.kubernetes.exec_cockroach(
             self._exec_pod_name(),
             self.container_name,
@@ -328,29 +304,6 @@ class CockroachOperations:
                 target_size_gib=target_size_gib,
                 **blocked.model_dump(),
             ).model_dump()
-        storage = self.get_storage_status(namespace, cluster)
-        current = self._current_pvc_size_gib(storage, node_id)
-        allows_expansion = self._storage_allows_expansion(storage, node_id)
-        if current is None:
-            return VolumeExpansionResult(
-                operation="expand_data_volume",
-                status="failed",
-                changed=False,
-                message="current PVC size is unknown",
-                node_id=node_id,
-                target_size_gib=target_size_gib,
-                state_before=storage,
-            ).model_dump()
-        if target_size_gib <= current or not allows_expansion:
-            return VolumeExpansionResult(
-                operation="expand_data_volume",
-                status="blocked",
-                changed=False,
-                message="volume expansion must be monotonic and supported by the storage class",
-                node_id=node_id,
-                target_size_gib=target_size_gib,
-                state_before=storage,
-            ).model_dump()
         result = self._call_optional("expand_data_volume", node_id, target_size_gib)
         if result is None:
             result = {"error": "provider does not implement expand_data_volume", "changed": False}
@@ -362,7 +315,6 @@ class CockroachOperations:
             message="volume expansion requested" if status == "success" else "volume expansion failed",
             node_id=node_id,
             target_size_gib=target_size_gib,
-            state_before=storage,
             state_after=self.get_storage_status(namespace, cluster),
             evidence=result,
         ).model_dump()
@@ -468,15 +420,6 @@ class CockroachOperations:
             )
         return None
 
-    def _failed_node_result(self, result_type: Any, operation: str, node_id: int, message: str) -> dict[str, Any]:
-        return result_type(
-            operation=operation,
-            status="failed",
-            changed=False,
-            message=message,
-            node_id=node_id,
-        ).model_dump()
-
     def _safe_call(self, fn: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
         try:
             result = fn(*args, **kwargs)
@@ -551,16 +494,3 @@ class CockroachOperations:
             and status.sql_ready
             and status.under_replicated_ranges == 0
         )
-
-    def _current_pvc_size_gib(self, storage: dict[str, Any], node_id: int) -> int | None:
-        for volume in storage.get("volumes", []):
-            if volume.get("node_id") == node_id:
-                value = volume.get("size_gib") or volume.get("current_size_gib")
-                return int(value) if value is not None else None
-        return None
-
-    def _storage_allows_expansion(self, storage: dict[str, Any], node_id: int) -> bool:
-        for volume in storage.get("volumes", []):
-            if volume.get("node_id") == node_id:
-                return bool(volume.get("allows_expansion", volume.get("storage_class_allows_expansion", False)))
-        return False

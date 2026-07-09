@@ -55,6 +55,10 @@ class FakeKubernetesProvider:
         self.restarted.append(pod_name)
         return {"changed": True, "pod": pod_name}
 
+    def delete_pod(self, pod_name):
+        self.restarted.append(pod_name)
+        return {"changed": True, "pod": pod_name}
+
     def exec_cockroach(self, pod_name, container, args):
         self.execs.append((pod_name, container, args))
         return {"pod": pod_name, "container": container, "command": ["cockroach", *args], "exit_code": 0}
@@ -132,6 +136,42 @@ def test_semantic_restart_uses_node_mapping_and_does_not_scale(tool_module, monk
     assert provider.scaled == []
 
 
+def test_semantic_restart_does_not_block_on_cluster_health(tool_module, monkeypatch):
+    class UnhealthyProvider(FakeKubernetesProvider):
+        def status(self):
+            return {
+                "pods": [{"name": "cockroachdb-0", "ready": False, "node_name": "worker-1"}],
+                "statefulsets": [{"name": "cockroachdb", "replicas": 1, "ready_replicas": 0}],
+                "services": [],
+                "events": [],
+            }
+
+    monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
+    tool_module.cockroach_provider = FakeCockroachProvider()
+    provider = UnhealthyProvider()
+    tool_module.kubernetes_provider = provider
+
+    result = json.loads(tool_module.restart_cockroach_node(1, "cockroachdb", "cockroachdb"))
+
+    assert result["status"] == "success"
+    assert result["changed"] is True
+    assert provider.restarted == ["cockroachdb-0"]
+
+
+def test_delete_cockroach_pod_deletes_named_pod(tool_module, monkeypatch):
+    monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
+    tool_module.cockroach_provider = FakeCockroachProvider()
+    provider = FakeKubernetesProvider()
+    tool_module.kubernetes_provider = provider
+
+    result = json.loads(tool_module.delete_cockroach_pod("cockroachdb-2", "cockroachdb", "cockroachdb"))
+
+    assert result["status"] == "success"
+    assert result["changed"] is True
+    assert result["pod_name"] == "cockroachdb-2"
+    assert provider.restarted == ["cockroachdb-2"]
+
+
 def test_semantic_drain_uses_rpc_host_for_node_decommission(tool_module, monkeypatch):
     monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
     tool_module.cockroach_provider = FakeCockroachProvider()
@@ -157,6 +197,18 @@ def test_semantic_drain_uses_rpc_host_for_node_decommission(tool_module, monkeyp
     ]
 
 
+def test_semantic_drain_does_not_block_when_node_is_absent_from_status(tool_module, monkeypatch):
+    monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
+    tool_module.cockroach_provider = FakeCockroachProvider()
+    provider = FakeKubernetesProvider()
+    tool_module.kubernetes_provider = provider
+
+    result = json.loads(tool_module.drain_cockroach_node(2, "cockroachdb", "cockroachdb"))
+
+    assert result["status"] == "success"
+    assert provider.execs[0][2][2] == "2"
+
+
 def test_semantic_scale_up_uses_cluster_tool(tool_module, monkeypatch):
     monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
     tool_module.cockroach_provider = FakeCockroachProvider()
@@ -169,7 +221,7 @@ def test_semantic_scale_up_uses_cluster_tool(tool_module, monkeypatch):
     assert provider.scaled == [("cockroachdb", 3)]
 
 
-def test_semantic_scale_down_is_guarded(tool_module, monkeypatch):
+def test_semantic_scale_down_calls_cluster_tool(tool_module, monkeypatch):
     class ThreeNodeProvider(FakeKubernetesProvider):
         def status(self):
             return {
@@ -190,24 +242,55 @@ def test_semantic_scale_down_is_guarded(tool_module, monkeypatch):
 
     result = json.loads(tool_module.scale_cockroach_cluster(2, "cockroachdb", "cockroachdb"))
 
-    assert result["status"] == "blocked"
-    assert result["changed"] is False
-    assert provider.scaled == []
+    assert result["status"] == "success"
+    assert result["changed"] is True
+    assert provider.scaled == [("cockroachdb", 2)]
 
 
-def test_semantic_volume_expansion_is_monotonic(tool_module, monkeypatch):
+def test_semantic_decommission_does_not_block_on_cluster_health(tool_module, monkeypatch):
+    class UnhealthyProvider(FakeKubernetesProvider):
+        def status(self):
+            return {
+                "pods": [{"name": "cockroachdb-0", "ready": False, "node_name": "worker-1"}],
+                "statefulsets": [{"name": "cockroachdb", "replicas": 1, "ready_replicas": 0}],
+                "services": [],
+                "events": [],
+            }
+
+    monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
+    tool_module.cockroach_provider = FakeCockroachProvider()
+    provider = UnhealthyProvider()
+    tool_module.kubernetes_provider = provider
+
+    result = json.loads(tool_module.decommission_cockroach_node(1, "cockroachdb", "cockroachdb"))
+
+    assert result["status"] == "success"
+    assert provider.execs == [
+        (
+            "cockroachdb-0",
+            "cockroachdb",
+            [
+                "node",
+                "decommission",
+                "1",
+                "--insecure",
+                "--host=cockroachdb-0.cockroachdb.cockroachdb.svc.cluster.local:26357",
+            ],
+        )
+    ]
+
+
+def test_semantic_volume_expansion_calls_provider_without_storage_precheck(tool_module, monkeypatch):
     monkeypatch.setattr(tool_module.settings, "mcp_read_only", False)
     tool_module.cockroach_provider = FakeCockroachProvider()
     provider = FakeKubernetesProvider()
     tool_module.kubernetes_provider = provider
 
-    blocked = json.loads(tool_module.expand_data_volume(1, 10, "cockroachdb", "cockroachdb"))
-    changed = json.loads(tool_module.expand_data_volume(1, 20, "cockroachdb", "cockroachdb"))
+    result = json.loads(tool_module.expand_data_volume(1, 10, "cockroachdb", "cockroachdb"))
 
-    assert blocked["status"] == "blocked"
-    assert blocked["changed"] is False
-    assert changed["status"] == "success"
-    assert provider.expanded == [(1, 20)]
+    assert result["status"] == "success"
+    assert result["changed"] is True
+    assert provider.expanded == [(1, 10)]
 
 
 def test_semantic_create_backup_blocks_when_read_only(tool_module):

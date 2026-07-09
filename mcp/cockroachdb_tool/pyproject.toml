@@ -1,7 +1,7 @@
 [project]
 name = "cockroachdb-tool"
 version = "0.1.0"
-description = "CockroachDB operator MCP server with guarded operations"
+description = "CockroachDB operator MCP server for direct operational actions"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

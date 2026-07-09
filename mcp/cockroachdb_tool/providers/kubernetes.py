@@ -29,6 +29,9 @@ class NullKubernetesProvider:
         return {"error": self.reason, "changed": False, "statefulset": name, "replicas": replicas}
 
     def restart_pod(self, pod_name: str) -> dict[str, Any]:
+        return self.delete_pod(pod_name)
+
+    def delete_pod(self, pod_name: str) -> dict[str, Any]:
         return {"error": self.reason, "changed": False, "pod": pod_name}
 
     def exec_cockroach(self, pod_name: str, container: str, args: list[str]) -> dict[str, Any]:
@@ -145,7 +148,13 @@ class KubernetesAPIProvider:
         return {"changed": True, "statefulset": name, "replicas": replicas}
 
     def restart_pod(self, pod_name: str) -> dict[str, Any]:
-        self.core.delete_namespaced_pod(name=pod_name, namespace=self.namespace)
+        return self.delete_pod(pod_name)
+
+    def delete_pod(self, pod_name: str) -> dict[str, Any]:
+        try:
+            self.core.delete_namespaced_pod(name=pod_name, namespace=self.namespace)
+        except Exception as exc:
+            return {"changed": False, "pod": pod_name, "error": str(exc), "error_type": type(exc).__name__}
         return {"changed": True, "pod": pod_name}
 
     def exec_cockroach(self, pod_name: str, container: str, args: list[str]) -> dict[str, Any]:

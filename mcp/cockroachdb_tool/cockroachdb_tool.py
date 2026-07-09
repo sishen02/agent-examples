@@ -225,13 +225,33 @@ def restart_cockroach_node(
         return _json({"error": str(exc), "changed": False, "node_id": node_id})
 
 
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False})
+def delete_cockroach_pod(
+    pod_name: str,
+    namespace: str | None = None,
+    cluster: str | None = None,
+) -> str:
+    """Delete one CockroachDB pod by Kubernetes pod name."""
+    try:
+        return _json(
+            _operations().delete_cockroach_pod(
+                namespace or settings.k8s_namespace,
+                cluster or settings.statefulset_name,
+                pod_name,
+            )
+        )
+    except Exception as exc:
+        logger.exception("delete_cockroach_pod failed")
+        return _json({"error": str(exc), "changed": False, "pod_name": pod_name})
+
+
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True})
 def scale_cockroach_cluster(
     target_replicas: int,
     namespace: str | None = None,
     cluster: str | None = None,
 ) -> str:
-    """Scale the CockroachDB cluster through a typed operation. Scale-down is guarded."""
+    """Scale the CockroachDB StatefulSet replica count."""
     try:
         return _json(
             _operations().scale_cockroach_cluster(

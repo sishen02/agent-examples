@@ -24,6 +24,9 @@ class KubernetesProvider(Protocol):
     def restart_pod(self, pod_name: str) -> dict[str, Any]:
         """Delete a pod so Kubernetes recreates it."""
 
+    def delete_pod(self, pod_name: str) -> dict[str, Any]:
+        """Delete a pod."""
+
     def exec_cockroach(self, pod_name: str, container: str, args: list[str]) -> dict[str, Any]:
         """Run a cockroach CLI command in a pod."""
 

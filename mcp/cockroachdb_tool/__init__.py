@@ -3,6 +3,7 @@
 from cockroachdb_tool.cockroachdb_tool import (
     create_backup,
     decommission_cockroach_node,
+    delete_cockroach_pod,
     drain_cockroach_node,
     expand_data_volume,
     get_backup_status,
@@ -21,6 +22,7 @@ from cockroachdb_tool.cockroachdb_tool import (
 __all__ = [
     "create_backup",
     "decommission_cockroach_node",
+    "delete_cockroach_pod",
     "drain_cockroach_node",
     "expand_data_volume",
     "get_backup_status",
