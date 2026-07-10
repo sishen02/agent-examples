@@ -22,6 +22,15 @@ def _safe_id(value: str | None, fallback: str) -> str:
     return text[:96] or fallback
 
 
+def _filename_timestamp(value: str | None) -> str:
+    text = value or _utc_now()
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return _safe_id(text, "timestamp")
+    return parsed.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+
+
 def _json_safe(value: Any) -> Any:
     if isinstance(value, BaseMessage):
         data: dict[str, Any] = {
@@ -102,7 +111,7 @@ def _history_message(message: BaseMessage) -> dict[str, Any]:
 
 
 class TrajectoryRecorder:
-    """Collect and atomically write one JSON trajectory per A2A context."""
+    """Collect and atomically write one JSON trajectory per completed turn."""
 
     def __init__(
         self,
@@ -111,6 +120,7 @@ class TrajectoryRecorder:
         task_id: str,
         context_id: str,
         user_input: str,
+        model_name: str,
         agent_version: str,
         enabled: bool = True,
     ):
@@ -118,13 +128,13 @@ class TrajectoryRecorder:
         self.output_dir = Path(output_dir)
         self.task_id = task_id
         self.context_id = context_id
+        self.model_name = model_name
         self.started_at = _utc_now()
-        filename = f"context-{_safe_id(context_id, 'context')}.json"
-        self.path = self.output_dir / filename
         self.data: dict[str, Any] = {
             "metadata": {
                 "latest_task_id": task_id,
                 "context_id": context_id,
+                "model": model_name,
                 "started_at": self.started_at,
                 "updated_at": None,
                 "status": "running",
@@ -200,15 +210,28 @@ class TrajectoryRecorder:
             self.data["error"] = {"type": type(error).__name__, "message": str(error)}
             self.data["turns"][-1]["error"] = self.data["error"]
 
+    def _path(self) -> Path:
+        model = _safe_id(self.model_name, "model")
+        timestamp = _filename_timestamp(self.data["metadata"].get("updated_at"))
+        return self.output_dir / f"trajectory-{model}-{timestamp}.json"
+
+    @staticmethod
+    def _available_path(path: Path) -> Path:
+        if not path.exists():
+            return path
+        index = 2
+        while True:
+            candidate = path.with_name(f"{path.stem}-{index}{path.suffix}")
+            if not candidate.exists():
+                return candidate
+            index += 1
+
     def write(self) -> Path | None:
         if not self.enabled:
             return None
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        if self.path.exists():
-            previous = json.loads(self.path.read_text(encoding="utf-8"))
-            self.data["metadata"]["started_at"] = previous.get("metadata", {}).get("started_at", self.started_at)
-            self.data["turns"] = [*previous.get("turns", []), *self.data["turns"]]
-        tmp_path = self.path.with_suffix(self.path.suffix + ".tmp")
+        path = self._available_path(self._path())
+        tmp_path = path.with_suffix(path.suffix + ".tmp")
         tmp_path.write_text(json.dumps(self.data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        os.replace(tmp_path, self.path)
-        return self.path
+        os.replace(tmp_path, path)
+        return path

@@ -230,6 +230,7 @@ class CockroachDBOperatorExecutor(AgentExecutor):
             task_id=task.id,
             context_id=task.context_id,
             user_input=user_input or "",
+            model_name=config.LLM_MODEL,
             agent_version=config.AGENT_VERSION,
             enabled=config.TRAJECTORY_ENABLED,
         )

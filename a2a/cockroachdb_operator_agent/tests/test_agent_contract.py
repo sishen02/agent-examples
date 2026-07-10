@@ -1,4 +1,5 @@
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -253,6 +254,7 @@ def test_trajectory_recorder_writes_successful_turn(tmp_path):
         task_id="task-1",
         context_id="ctx-1",
         user_input="Inspect the cluster",
+        model_name="openai/gpt-5",
         agent_version="test",
     )
     recorder.record_mcp_connection(success=True, tools=["get_cluster_status"])
@@ -307,6 +309,8 @@ def test_trajectory_recorder_writes_successful_turn(tmp_path):
     path = recorder.write()
     data = json.loads(path.read_text())
 
+    assert re.fullmatch(r"trajectory-openai-gpt-5-\d{8}T\d{12}Z\.json", path.name)
+    assert data["metadata"]["model"] == "openai/gpt-5"
     assert data["metadata"]["status"] == "success"
     assert data["input"]["text"] == "Inspect the cluster"
     assert data["mcp_connection"]["tools"] == ["get_cluster_status"]
@@ -318,12 +322,13 @@ def test_trajectory_recorder_writes_successful_turn(tmp_path):
     assert not list(tmp_path.glob("*.tmp"))
 
 
-def test_trajectory_recorder_appends_turns_to_context_file(tmp_path):
+def test_trajectory_recorder_writes_one_file_per_turn(tmp_path):
     first = TrajectoryRecorder(
         output_dir=str(tmp_path),
         task_id="task-1",
         context_id="ctx-1",
         user_input="Inspect the cluster",
+        model_name="claude/sonnet 4",
         agent_version="test",
     )
     first.record_messages(
@@ -340,6 +345,7 @@ def test_trajectory_recorder_appends_turns_to_context_file(tmp_path):
         task_id="task-2",
         context_id="ctx-1",
         user_input="What did you find?",
+        model_name="claude/sonnet 4",
         agent_version="test",
     )
     second.record_messages(
@@ -353,14 +359,20 @@ def test_trajectory_recorder_appends_turns_to_context_file(tmp_path):
     second.finish(status="success", final_text="It was healthy.")
     second_path = second.write()
 
-    data = json.loads(second_path.read_text())
+    first_data = json.loads(first_path.read_text())
+    second_data = json.loads(second_path.read_text())
 
-    assert first_path == second_path
-    assert len(list(tmp_path.glob("*.json"))) == 1
-    assert data["metadata"]["context_id"] == "ctx-1"
-    assert data["metadata"]["latest_task_id"] == "task-2"
-    assert [turn["task_id"] for turn in data["turns"]] == ["task-1", "task-2"]
-    assert [message["content"] for message in data["messages"]] == [
+    assert first_path != second_path
+    assert len(list(tmp_path.glob("*.json"))) == 2
+    assert first_path.name.startswith("trajectory-claude-sonnet-4-")
+    assert second_path.name.startswith("trajectory-claude-sonnet-4-")
+    assert first_data["metadata"]["context_id"] == "ctx-1"
+    assert first_data["metadata"]["latest_task_id"] == "task-1"
+    assert second_data["metadata"]["context_id"] == "ctx-1"
+    assert second_data["metadata"]["latest_task_id"] == "task-2"
+    assert [turn["task_id"] for turn in first_data["turns"]] == ["task-1"]
+    assert [turn["task_id"] for turn in second_data["turns"]] == ["task-2"]
+    assert [message["content"] for message in second_data["messages"]] == [
         "Inspect the cluster",
         "The cluster is healthy.",
         "What did you find?",
@@ -374,6 +386,7 @@ def test_trajectory_recorder_writes_failure_with_fallback_serialization(tmp_path
         task_id="task/with spaces",
         context_id="ctx/with spaces",
         user_input="Inspect the cluster",
+        model_name="model/with spaces",
         agent_version="test",
     )
     error = RuntimeError("connection refused")
@@ -385,6 +398,7 @@ def test_trajectory_recorder_writes_failure_with_fallback_serialization(tmp_path
     data = json.loads(path.read_text())
 
     assert "/" not in path.name
+    assert path.name.startswith("trajectory-model-with-spaces-")
     assert data["metadata"]["status"] == "failed"
     assert data["mcp_connection"]["error"] == {
         "type": "RuntimeError",
