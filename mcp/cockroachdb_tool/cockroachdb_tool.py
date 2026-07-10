@@ -80,24 +80,21 @@ def _build_kubernetes_provider():
 
 cockroach_provider = _build_cockroach_provider()
 kubernetes_provider = _build_kubernetes_provider()
-
-
-def _operations() -> CockroachOperations:
-    return CockroachOperations(
-        cockroach_provider,
-        kubernetes_provider,
-        statefulset_name=settings.statefulset_name,
-        container_name=settings.cockroach_container_name,
-        grpc_port=settings.grpc_port,
-        secure=settings.secure,
-    )
+operations = CockroachOperations(
+    cockroach_provider,
+    kubernetes_provider,
+    statefulset_name=settings.statefulset_name,
+    container_name=settings.cockroach_container_name,
+    grpc_port=settings.grpc_port,
+    secure=settings.secure,
+)
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
 def get_cluster_status(namespace: str | None = None, cluster: str | None = None) -> str:
     """Return typed CockroachDB cluster health and readiness state."""
     try:
-        return _json(_operations().get_cluster_status(namespace or settings.k8s_namespace, cluster or settings.statefulset_name))
+        return _json(operations.get_cluster_status(namespace or settings.k8s_namespace, cluster or settings.statefulset_name))
     except Exception as exc:
         logger.exception("get_cluster_status failed")
         return _json({"error": str(exc)})
@@ -107,7 +104,7 @@ def get_cluster_status(namespace: str | None = None, cluster: str | None = None)
 def list_database_nodes(namespace: str | None = None, cluster: str | None = None) -> str:
     """Return typed CockroachDB node and pod state."""
     try:
-        return _json(_operations().list_database_nodes(namespace or settings.k8s_namespace, cluster or settings.statefulset_name))
+        return _json(operations.list_database_nodes(namespace or settings.k8s_namespace, cluster or settings.statefulset_name))
     except Exception as exc:
         logger.exception("list_database_nodes failed")
         return _json({"error": str(exc), "nodes": []})
@@ -117,7 +114,7 @@ def list_database_nodes(namespace: str | None = None, cluster: str | None = None
 def get_node_status(node_id: int, namespace: str | None = None, cluster: str | None = None) -> str:
     """Return typed status for one CockroachDB node."""
     try:
-        return _json(_operations().get_node_status(namespace or settings.k8s_namespace, cluster or settings.statefulset_name, node_id))
+        return _json(operations.get_node_status(namespace or settings.k8s_namespace, cluster or settings.statefulset_name, node_id))
     except Exception as exc:
         logger.exception("get_node_status failed")
         return _json({"error": str(exc), "node_id": node_id})
@@ -127,7 +124,7 @@ def get_node_status(node_id: int, namespace: str | None = None, cluster: str | N
 def get_storage_status(namespace: str | None = None, cluster: str | None = None) -> str:
     """Return typed PVC/storage state relevant to CockroachDB operations."""
     try:
-        return _json(_operations().get_storage_status(namespace or settings.k8s_namespace, cluster or settings.statefulset_name))
+        return _json(operations.get_storage_status(namespace or settings.k8s_namespace, cluster or settings.statefulset_name))
     except Exception as exc:
         logger.exception("get_storage_status failed")
         return _json({"error": str(exc), "volumes": []})
@@ -137,7 +134,7 @@ def get_storage_status(namespace: str | None = None, cluster: str | None = None)
 def get_backup_status(namespace: str | None = None, cluster: str | None = None) -> str:
     """Return typed backup recency and location state."""
     try:
-        return _json(_operations().get_backup_status(namespace or settings.k8s_namespace, cluster or settings.statefulset_name))
+        return _json(operations.get_backup_status(namespace or settings.k8s_namespace, cluster or settings.statefulset_name))
     except Exception as exc:
         logger.exception("get_backup_status failed")
         return _json({"error": str(exc)})
@@ -152,7 +149,7 @@ def drain_cockroach_node(
     """Start CockroachDB drain/decommission protocol for one node without deleting its pod or PVC."""
     try:
         return _json(
-            _operations().drain_cockroach_node(
+            operations.drain_cockroach_node(
                 namespace or settings.k8s_namespace,
                 cluster or settings.statefulset_name,
                 node_id,
@@ -173,7 +170,7 @@ def wait_for_node_ready(
     """Wait until one CockroachDB node is both pod-ready and live."""
     try:
         return _json(
-            _operations().wait_for_node_ready(
+            operations.wait_for_node_ready(
                 namespace or settings.k8s_namespace,
                 cluster or settings.statefulset_name,
                 node_id,
@@ -194,7 +191,7 @@ def wait_for_cluster_healthy(
     """Wait until cluster status is healthy according to typed state projections."""
     try:
         return _json(
-            _operations().wait_for_cluster_healthy(
+            operations.wait_for_cluster_healthy(
                 namespace or settings.k8s_namespace,
                 cluster or settings.statefulset_name,
                 timeout_seconds=timeout_seconds,
@@ -214,7 +211,7 @@ def restart_cockroach_node(
     """Restart exactly one CockroachDB node. Does not delete PVCs or change replica count."""
     try:
         return _json(
-            _operations().restart_cockroach_node(
+            operations.restart_cockroach_node(
                 namespace or settings.k8s_namespace,
                 cluster or settings.statefulset_name,
                 node_id,
@@ -234,7 +231,7 @@ def delete_cockroach_pod(
     """Delete one CockroachDB pod by Kubernetes pod name."""
     try:
         return _json(
-            _operations().delete_cockroach_pod(
+            operations.delete_cockroach_pod(
                 namespace or settings.k8s_namespace,
                 cluster or settings.statefulset_name,
                 pod_name,
@@ -254,7 +251,7 @@ def scale_cockroach_statefulset(
     """Scale the CockroachDB StatefulSet replica count."""
     try:
         return _json(
-            _operations().scale_cockroach_statefulset(
+            operations.scale_cockroach_statefulset(
                 namespace or settings.k8s_namespace,
                 cluster or settings.statefulset_name,
                 target_replicas,
@@ -274,7 +271,7 @@ def decommission_cockroach_node(
     """Permanently decommission one CockroachDB node without deleting PVCs."""
     try:
         return _json(
-            _operations().decommission_cockroach_node(
+            operations.decommission_cockroach_node(
                 namespace or settings.k8s_namespace,
                 cluster or settings.statefulset_name,
                 node_id,
@@ -295,7 +292,7 @@ def expand_data_volume(
     """Expand one CockroachDB data PVC upward. Never deletes or recreates PVCs."""
     try:
         return _json(
-            _operations().expand_data_volume(
+            operations.expand_data_volume(
                 namespace or settings.k8s_namespace,
                 cluster or settings.statefulset_name,
                 node_id,
@@ -317,7 +314,7 @@ def create_backup(
     """Request a CockroachDB backup."""
     try:
         return _json(
-            _operations().create_backup(
+            operations.create_backup(
                 namespace or settings.k8s_namespace,
                 cluster or settings.statefulset_name,
                 backup_scope=backup_scope,
