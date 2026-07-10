@@ -46,6 +46,7 @@ Operating rules:
    node drain/decommission, and data volume expansion.
 6. After a change, re-check relevant health signals and summarize the result.
 7. These tools return evidence; do not claim that preconditions or postconditions are satisfied unless separate evidence proves that.
+8. Call at most one tool at a time. After each tool result, decide whether another single tool call is needed.
 
 Return concise, operator-oriented answers with evidence and next steps."""
 
@@ -55,6 +56,12 @@ FINALIZER_PROMPT = """The previous assistant message was empty.
 Use the conversation and tool results below to produce the final user-facing answer.
 Do not call tools. Be concise, operator-oriented, and base the answer only on the
 provided evidence. If the operation failed, say that clearly."""
+
+
+TOOL_LIMIT_PROMPT = """Your previous response requested more than one tool call.
+
+Only one tool call is allowed at a time. Choose the single next tool call that is
+most important, or answer from the evidence already available."""
 
 
 def content_to_text(content: Any) -> str | None:
@@ -84,6 +91,13 @@ def build_finalizer_messages(messages: list[BaseMessage]) -> list[BaseMessage]:
     return [SystemMessage(content=FINALIZER_PROMPT), *messages]
 
 
+def build_tool_limit_messages(messages: list[BaseMessage]) -> list[BaseMessage]:
+    """Build a retry prompt after the model requested too many tools."""
+    if messages and isinstance(messages[-1], AIMessage) and len(getattr(messages[-1], "tool_calls", None) or []) > 1:
+        messages = messages[:-1]
+    return [SystemMessage(content=TOOL_LIMIT_PROMPT), *messages]
+
+
 def route_after_assistant(state: MessagesState) -> str:
     """Route to tools, finalizer, or end after the assistant node."""
     messages = state["messages"]
@@ -92,7 +106,10 @@ def route_after_assistant(state: MessagesState) -> str:
 
     newest_message = messages[-1]
     if isinstance(newest_message, AIMessage):
-        if getattr(newest_message, "tool_calls", None):
+        tool_calls = getattr(newest_message, "tool_calls", None) or []
+        if len(tool_calls) > 1:
+            return "finalizer"
+        if tool_calls:
             return "tools"
         if not content_to_text(newest_message.content):
             return "finalizer"
@@ -120,9 +137,19 @@ async def get_graph(client: MultiServerMCPClient) -> StateGraph:
 
     sys_msg = SystemMessage(content=SYSTEM_PROMPT)
 
+    def enforce_single_tool_call(result: AIMessage, messages: list[BaseMessage]) -> AIMessage:
+        tool_calls = getattr(result, "tool_calls", None) or []
+        if len(tool_calls) <= 1:
+            return result
+        retry = llm_with_tools.invoke([sys_msg] + build_tool_limit_messages(messages))
+        retry_tool_calls = getattr(retry, "tool_calls", None) or []
+        if len(retry_tool_calls) > 1:
+            return AIMessage(content=retry.content, tool_calls=retry_tool_calls[:1])
+        return retry
+
     def assistant(state: MessagesState) -> MessagesState:
         result = llm_with_tools.invoke([sys_msg] + state["messages"])
-        return {"messages": [result]}
+        return {"messages": [enforce_single_tool_call(result, state["messages"])]}
 
     async def finalizer(state: MessagesState) -> MessagesState:
         result = await llm.ainvoke(build_finalizer_messages(state["messages"]))

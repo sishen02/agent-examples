@@ -9,8 +9,6 @@ A2A agent for CockroachDB SRE/DBA workflows. It uses the CockroachDB MCP tool se
 - Produces evidence-based operational plans.
 - Executes backup creation, scaling, node restart, node decommission, and volume expansion through MCP tools.
 
-It is not a background reconciliation controller.
-
 ## Configuration
 
 Template env files are provided:
@@ -33,10 +31,11 @@ Conversation history is held in memory per A2A `context_id` and bounded by
 
 ## Trajectory Files
 
-Each request writes one JSON trajectory file when `TRAJECTORY_ENABLED=true`.
-The file includes the user input, MCP connection check, streamed graph updates,
-tool calls, tool results, the final assistant text, and error details when a
-request fails.
+Each A2A `context_id` writes one JSON trajectory file when
+`TRAJECTORY_ENABLED=true`. Later requests in the same context update the same
+file, appending turn details and replacing the top-level `messages` array with
+the full linear conversation history: user prompts, assistant tool calls, tool
+results, and final assistant responses.
 
 For persistence across pod restarts, deploy this agent as a StatefulSet with
 persistent storage enabled. Kagenti mounts that storage at `/shared`, so the

@@ -41,11 +41,9 @@ class ConversationHistory:
         """Return previous messages plus the current user message."""
         return list(self._messages[context_id]) + [HumanMessage(content=user_input)]
 
-    def record_turn(self, context_id: str, user_input: str, assistant_output: str) -> None:
-        """Persist the current user/assistant text turn."""
-        history = self._messages[context_id]
-        history.append(HumanMessage(content=user_input))
-        history.append(AIMessage(content=assistant_output))
+    def replace_messages(self, context_id: str, messages: list[BaseMessage]) -> None:
+        """Persist the completed conversation state for this context."""
+        self._messages[context_id] = deque(messages, maxlen=self.max_messages)
 
     def get_messages(self, context_id: str) -> list[BaseMessage]:
         """Return a copy of stored messages for tests and diagnostics."""
@@ -136,6 +134,15 @@ def _extract_final_text_from_graph_update(event: dict[str, Any]) -> str | None:
     return None
 
 
+def _messages_from_graph_update(event: dict[str, Any]) -> list[BaseMessage]:
+    """Return LangGraph messages emitted by one streamed update."""
+    messages = []
+    for update in event.values():
+        if isinstance(update, dict):
+            messages.extend(message for message in update.get("messages", []) if isinstance(message, BaseMessage))
+    return messages
+
+
 def get_agent_card(host: str, port: int) -> AgentCard:
     """Return the A2A agent card."""
     capabilities = AgentCapabilities(streaming=True)
@@ -163,8 +170,6 @@ def get_agent_card(host: str, port: int) -> AgentCard:
             - Inspect Kubernetes pods, StatefulSets, services, and events
             - Produce evidence-based operational plans
             - Execute backup creation, scaling, node restart, node decommission, and volume expansion through MCP tools
-
-            The agent is not a continuous reconciliation controller.
             """
         ),
         supported_interfaces=[
@@ -237,6 +242,7 @@ class CockroachDBOperatorExecutor(AgentExecutor):
 
         mcpclient = get_mcpclient()
         final_text = None
+        completed_messages: list[BaseMessage] = []
         try:
             try:
                 tools = await mcpclient.get_tools()
@@ -251,7 +257,9 @@ class CockroachDBOperatorExecutor(AgentExecutor):
 
             graph = await get_graph(mcpclient)
             graph_input = {"messages": conversation_history.build_turn_messages(task.context_id, user_input)}
+            completed_messages = list(graph_input["messages"])
             async for event in graph.astream(graph_input, stream_mode="updates"):
+                completed_messages.extend(_messages_from_graph_update(event))
                 formatted_event = _format_graph_update(event)
                 trajectory.record_graph_update(event, formatted_event=formatted_event)
                 if formatted_event:
@@ -264,12 +272,16 @@ class CockroachDBOperatorExecutor(AgentExecutor):
             if not final_text:
                 logger.warning("Graph completed without a final assistant answer")
                 final_text = "Task completed without a final answer."
-            conversation_history.record_turn(task.context_id, user_input, final_text)
+                completed_messages.append(AIMessage(content=final_text))
+            conversation_history.replace_messages(task.context_id, completed_messages)
+            trajectory.record_messages(completed_messages)
             trajectory.finish(status="success", final_text=final_text)
             await event_emitter.emit_event(final_text, final=True)
         except Exception as exc:
             logger.exception("CockroachDB operator execution failed")
             final_text = f"Error: Failed to process CockroachDB request. {exc}"
+            if completed_messages:
+                trajectory.record_messages(completed_messages)
             trajectory.finish(status="failed", final_text=final_text, error=exc)
             await event_emitter.emit_event(final_text, failed=True)
             raise
