@@ -38,7 +38,7 @@ Operating rules:
 2. Do not invent cluster state. Base conclusions on tool output or say what is unknown.
 3. Use only the available CockroachDB MCP tools. They cover cluster status, database nodes,
    node status, storage status, backup status, node drain/decommission, node restart,
-   cluster scale, data volume expansion, backup creation, and readiness waits.
+   StatefulSet scaling, data volume expansion, backup creation, and readiness waits.
 4. Do not claim you can run arbitrary SQL, restore backups, upgrade versions, edit manifests,
    delete Kubernetes resources, or move workloads between Kubernetes nodes unless a tool result
    demonstrates that capability.

@@ -14,14 +14,14 @@ FastMCP server for CockroachDB operations. It is designed to be used by an agent
 - `wait_for_cluster_healthy(namespace, cluster, timeout_seconds)` - wait for the cluster health projection to pass.
 - `restart_cockroach_node(namespace, cluster, node_id)` - restart exactly one CockroachDB node.
 - `delete_cockroach_pod(namespace, cluster, pod_name)` - delete one CockroachDB pod by Kubernetes pod name.
-- `scale_cockroach_cluster(namespace, cluster, target_replicas)` - scale the CockroachDB StatefulSet replica count.
+- `scale_cockroach_statefulset(namespace, cluster, target_replicas)` - scale the CockroachDB StatefulSet replica count.
 - `decommission_cockroach_node(namespace, cluster, node_id)` - permanently decommission one CockroachDB node without deleting PVCs.
 - `expand_data_volume(namespace, cluster, node_id, target_size_gib)` - expand one data PVC upward only.
-- `create_backup(namespace, cluster, backup_scope, database)` - create a typed backup operation receipt.
+- `create_backup(namespace, cluster, backup_scope, database)` - request a CockroachDB backup.
 
-These tools return structured receipts with operation name, status, change
-flag, message, evidence, and pre/post state where relevant. The agent or
-external runtime-verification layer is responsible for temporal policy decisions.
+Inspection tools return structured state projections. Mutation and wait tools
+return concise text describing what was requested or an `Error:` message when
+the operation fails.
 
 ## Configuration
 

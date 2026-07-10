@@ -10,33 +10,17 @@ try:
     from cockroachdb_tool.schemas import (
         BackupStatus,
         ClusterStatus,
-        DecommissionResult,
-        DrainResult,
         NodeInfo,
         NodeStatus,
-        OperationReceipt,
-        PodDeleteResult,
-        RestartResult,
-        ScaleResult,
         StorageStatus,
-        VolumeExpansionResult,
-        WaitResult,
     )
 except ImportError:
     from schemas import (
         BackupStatus,
         ClusterStatus,
-        DecommissionResult,
-        DrainResult,
         NodeInfo,
         NodeStatus,
-        OperationReceipt,
-        PodDeleteResult,
-        RestartResult,
-        ScaleResult,
         StorageStatus,
-        VolumeExpansionResult,
-        WaitResult,
     )
 
 
@@ -106,8 +90,7 @@ class CockroachOperations:
             evidence=provider_result,
         ).model_dump()
 
-    def drain_cockroach_node(self, namespace: str, cluster: str, node_id: int) -> dict[str, Any]:
-        state_before = self._cluster_status_model(namespace, cluster).model_dump()
+    def drain_cockroach_node(self, namespace: str, cluster: str, node_id: int) -> str:
         result = self.kubernetes.exec_cockroach(
             self._exec_pod_name(),
             self.container_name,
@@ -120,17 +103,9 @@ class CockroachOperations:
                 self._node_rpc_host_flag(namespace),
             ],
         )
-        status = "success" if self._provider_ok(result) else "failed"
-        return DrainResult(
-            operation="drain_cockroach_node",
-            status=status,
-            changed=bool(result.get("changed", True)) and status == "success",
-            message="drain started" if status == "success" else "drain failed",
-            node_id=node_id,
-            state_before=state_before,
-            state_after=self._cluster_status_model(namespace, cluster).model_dump(),
-            evidence=result,
-        ).model_dump()
+        if not self._provider_ok(result):
+            return self._error_message("drain_cockroach_node", "drain failed", result)
+        return f"Started CockroachDB drain for node {node_id} in StatefulSet {cluster}."
 
     def wait_for_node_ready(
         self,
@@ -138,27 +113,14 @@ class CockroachOperations:
         cluster: str,
         node_id: int,
         timeout_seconds: int = 300,
-    ) -> dict[str, Any]:
+    ) -> str:
         deadline = time.time() + max(0, min(timeout_seconds, 3600))
         while True:
             node = self._node_info(node_id)
             if node and node.pod_ready and node.cockroach_live:
-                return WaitResult(
-                    operation="wait_for_node_ready",
-                    status="success",
-                    changed=False,
-                    message="node is ready",
-                    evidence={"node": node.model_dump()},
-                ).model_dump()
+                return f"CockroachDB node {node_id} is ready."
             if time.time() >= deadline:
-                return WaitResult(
-                    operation="wait_for_node_ready",
-                    status="failed",
-                    changed=False,
-                    message="timed out waiting for node readiness",
-                    timed_out=True,
-                    evidence={"namespace": namespace, "cluster": cluster, "node_id": node_id},
-                ).model_dump()
+                return f"Error: timed out waiting for CockroachDB node {node_id} to become ready."
             time.sleep(1)
 
     def wait_for_cluster_healthy(
@@ -166,27 +128,14 @@ class CockroachOperations:
         namespace: str,
         cluster: str,
         timeout_seconds: int = 300,
-    ) -> dict[str, Any]:
+    ) -> str:
         deadline = time.time() + max(0, min(timeout_seconds, 3600))
         while True:
             status = self._cluster_status_model(namespace, cluster)
             if self._cluster_healthy(status):
-                return WaitResult(
-                    operation="wait_for_cluster_healthy",
-                    status="success",
-                    changed=False,
-                    message="cluster is healthy",
-                    evidence=status.model_dump(),
-                ).model_dump()
+                return f"CockroachDB StatefulSet {cluster} is healthy."
             if time.time() >= deadline:
-                return WaitResult(
-                    operation="wait_for_cluster_healthy",
-                    status="failed",
-                    changed=False,
-                    message="timed out waiting for cluster health",
-                    timed_out=True,
-                    evidence=status.model_dump(),
-                ).model_dump()
+                return f"Error: timed out waiting for CockroachDB StatefulSet {cluster} to become healthy."
             time.sleep(1)
 
     def restart_cockroach_node(
@@ -194,84 +143,46 @@ class CockroachOperations:
         namespace: str,
         cluster: str,
         node_id: int,
-    ) -> dict[str, Any]:
+    ) -> str:
         pod_name = self._pod_name_for_node(node_id)
         result = self.kubernetes.restart_pod(pod_name)
-        status = "success" if self._provider_ok(result) else "failed"
-        return RestartResult(
-            operation="restart_cockroach_node",
-            status=status,
-            changed=bool(result.get("changed", False)) and status == "success",
-            message="node restart requested" if status == "success" else "node restart failed",
-            node_id=node_id,
-            state_after=self._cluster_status_model(namespace, cluster).model_dump(),
-            evidence=result,
-        ).model_dump()
+        if not self._provider_ok(result):
+            return self._error_message("restart_cockroach_node", "node restart failed", result)
+        return f"Requested restart of CockroachDB node {node_id} by deleting pod {pod_name}."
 
-    def delete_cockroach_pod(self, namespace: str, cluster: str, pod_name: str) -> dict[str, Any]:
+    def delete_cockroach_pod(self, namespace: str, cluster: str, pod_name: str) -> str:
         result = self.kubernetes.delete_pod(pod_name)
-        status = "success" if self._provider_ok(result) else "failed"
-        return PodDeleteResult(
-            operation="delete_cockroach_pod",
-            status=status,
-            changed=bool(result.get("changed", False)) and status == "success",
-            message="pod deletion requested" if status == "success" else "pod deletion failed",
-            pod_name=pod_name,
-            state_after=self._cluster_status_model(namespace, cluster).model_dump(),
-            evidence=result,
-        ).model_dump()
+        if not self._provider_ok(result):
+            return self._error_message("delete_cockroach_pod", "pod deletion failed", result)
+        return f"Requested deletion of CockroachDB pod {pod_name}."
 
-    def scale_cockroach_cluster(
+    def scale_cockroach_statefulset(
         self,
         namespace: str,
         cluster: str,
         target_replicas: int,
-    ) -> dict[str, Any]:
+    ) -> str:
         if target_replicas < 1:
-            return ScaleResult(
-                operation="scale_cockroach_cluster",
-                status="failed",
-                changed=False,
-                message="target_replicas must be at least 1",
-                target_replicas=target_replicas,
-            ).model_dump()
-        state_before = self._cluster_status_model(namespace, cluster)
+            return "Error: target_replicas must be at least 1."
         result = self.kubernetes.scale_statefulset(self.statefulset_name, target_replicas)
-        status = "success" if self._provider_ok(result) else "failed"
-        return ScaleResult(
-            operation="scale_cockroach_cluster",
-            status=status,
-            changed=bool(result.get("changed", False)) and status == "success",
-            message="cluster scale requested" if status == "success" else "cluster scale failed",
-            target_replicas=target_replicas,
-            state_before=state_before.model_dump(),
-            state_after=self._cluster_status_model(namespace, cluster).model_dump(),
-            evidence=result,
-        ).model_dump()
+        if not self._provider_ok(result):
+            return self._error_message("scale_cockroach_statefulset", "StatefulSet scale failed", result)
+        return f"Requested scaling CockroachDB StatefulSet {self.statefulset_name} to {target_replicas} replicas."
 
     def decommission_cockroach_node(
         self,
         namespace: str,
         cluster: str,
         node_id: int,
-    ) -> dict[str, Any]:
-        state_before = self._cluster_status_model(namespace, cluster)
+    ) -> str:
         result = self.kubernetes.exec_cockroach(
             self._exec_pod_name(),
             self.container_name,
             ["node", "decommission", str(node_id), self._secure_flag(), self._node_rpc_host_flag(namespace)],
         )
-        status = "success" if self._provider_ok(result) else "failed"
-        return DecommissionResult(
-            operation="decommission_cockroach_node",
-            status=status,
-            changed=bool(result.get("changed", True)) and status == "success",
-            message="node decommission requested" if status == "success" else "node decommission failed",
-            node_id=node_id,
-            state_before=state_before.model_dump(),
-            state_after=self._cluster_status_model(namespace, cluster).model_dump(),
-            evidence=result,
-        ).model_dump()
+        if not self._provider_ok(result):
+            return self._error_message("decommission_cockroach_node", "node decommission failed", result)
+        return f"Requested decommission of CockroachDB node {node_id}."
 
     def expand_data_volume(
         self,
@@ -279,21 +190,13 @@ class CockroachOperations:
         cluster: str,
         node_id: int,
         target_size_gib: int,
-    ) -> dict[str, Any]:
+    ) -> str:
         result = self._call_optional("expand_data_volume", node_id, target_size_gib)
         if result is None:
             result = {"error": "provider does not implement expand_data_volume", "changed": False}
-        status = "success" if self._provider_ok(result) else "failed"
-        return VolumeExpansionResult(
-            operation="expand_data_volume",
-            status=status,
-            changed=bool(result.get("changed", False)) and status == "success",
-            message="volume expansion requested" if status == "success" else "volume expansion failed",
-            node_id=node_id,
-            target_size_gib=target_size_gib,
-            state_after=self.get_storage_status(namespace, cluster),
-            evidence=result,
-        ).model_dump()
+        if not self._provider_ok(result):
+            return self._error_message("expand_data_volume", "volume expansion failed", result)
+        return f"Requested expansion of CockroachDB node {node_id} data volume to {target_size_gib}Gi."
 
     def create_backup(
         self,
@@ -301,22 +204,14 @@ class CockroachOperations:
         cluster: str,
         backup_scope: str = "cluster",
         database: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> str:
         backup_id = f"{cluster}-{uuid4().hex[:8]}"
         result = self._call_optional("create_backup", backup_scope, database, backup_id)
         if result is None:
             result = {"error": "provider does not implement create_backup", "backup_id": backup_id, "changed": False}
-        status = "success" if self._provider_ok(result) else "failed"
-        return {
-            **OperationReceipt(
-                operation="create_backup",
-                status=status,
-                changed=bool(result.get("changed", False)) and status == "success",
-                message="backup requested" if status == "success" else "backup failed",
-                evidence=result,
-            ).model_dump(),
-            "backup_id": result.get("backup_id", backup_id) if status == "success" else None,
-        }
+        if not self._provider_ok(result):
+            return self._error_message("create_backup", "backup failed", result)
+        return f"Requested CockroachDB {backup_scope} backup {result.get('backup_id', backup_id)}."
 
     def _cluster_status_model(self, namespace: str, cluster: str) -> ClusterStatus:
         k8s_status = self._safe_call(self.kubernetes.status)
@@ -387,6 +282,13 @@ class CockroachOperations:
             return result if isinstance(result, dict) else {"result": result}
         except Exception as exc:
             return {"error": str(exc)}
+
+    def _error_message(self, operation: str, fallback: str, result: Any) -> str:
+        if isinstance(result, dict):
+            detail = result.get("error") or result.get("message") or result.get("stderr") or fallback
+        else:
+            detail = result or fallback
+        return f"Error: {operation} failed: {detail}"
 
     def _call_optional(self, name: str, *args: Any, **kwargs: Any) -> Any:
         fn = getattr(self.kubernetes, name, None)

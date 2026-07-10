@@ -107,10 +107,9 @@ def test_semantic_restart_uses_node_mapping_and_does_not_scale(tool_module, monk
     provider = FakeKubernetesProvider()
     tool_module.kubernetes_provider = provider
 
-    result = json.loads(tool_module.restart_cockroach_node(1, "cockroachdb", "cockroachdb"))
+    result = tool_module.restart_cockroach_node(1, "cockroachdb", "cockroachdb")
 
-    assert result["status"] == "success"
-    assert result["changed"] is True
+    assert result == "Requested restart of CockroachDB node 1 by deleting pod cockroachdb-0."
     assert provider.restarted == ["cockroachdb-0"]
     assert provider.scaled == []
 
@@ -129,10 +128,9 @@ def test_semantic_restart_does_not_block_on_cluster_health(tool_module, monkeypa
     provider = UnhealthyProvider()
     tool_module.kubernetes_provider = provider
 
-    result = json.loads(tool_module.restart_cockroach_node(1, "cockroachdb", "cockroachdb"))
+    result = tool_module.restart_cockroach_node(1, "cockroachdb", "cockroachdb")
 
-    assert result["status"] == "success"
-    assert result["changed"] is True
+    assert result == "Requested restart of CockroachDB node 1 by deleting pod cockroachdb-0."
     assert provider.restarted == ["cockroachdb-0"]
 
 
@@ -141,11 +139,9 @@ def test_delete_cockroach_pod_deletes_named_pod(tool_module, monkeypatch):
     provider = FakeKubernetesProvider()
     tool_module.kubernetes_provider = provider
 
-    result = json.loads(tool_module.delete_cockroach_pod("cockroachdb-2", "cockroachdb", "cockroachdb"))
+    result = tool_module.delete_cockroach_pod("cockroachdb-2", "cockroachdb", "cockroachdb")
 
-    assert result["status"] == "success"
-    assert result["changed"] is True
-    assert result["pod_name"] == "cockroachdb-2"
+    assert result == "Requested deletion of CockroachDB pod cockroachdb-2."
     assert provider.restarted == ["cockroachdb-2"]
 
 
@@ -154,9 +150,9 @@ def test_semantic_drain_uses_rpc_host_for_node_decommission(tool_module, monkeyp
     provider = FakeKubernetesProvider()
     tool_module.kubernetes_provider = provider
 
-    result = json.loads(tool_module.drain_cockroach_node(1, "cockroachdb", "cockroachdb"))
+    result = tool_module.drain_cockroach_node(1, "cockroachdb", "cockroachdb")
 
-    assert result["status"] == "success"
+    assert result == "Started CockroachDB drain for node 1 in StatefulSet cockroachdb."
     assert provider.execs == [
         (
             "cockroachdb-0",
@@ -167,7 +163,7 @@ def test_semantic_drain_uses_rpc_host_for_node_decommission(tool_module, monkeyp
                 "1",
                 "--wait=none",
                 "--insecure",
-                "--host=cockroachdb-0.cockroachdb.cockroachdb.svc.cluster.local:26357",
+                f"--host=cockroachdb-0.cockroachdb.cockroachdb.svc.cluster.local:{tool_module.settings.grpc_port}",
             ],
         )
     ]
@@ -178,24 +174,24 @@ def test_semantic_drain_does_not_block_when_node_is_absent_from_status(tool_modu
     provider = FakeKubernetesProvider()
     tool_module.kubernetes_provider = provider
 
-    result = json.loads(tool_module.drain_cockroach_node(2, "cockroachdb", "cockroachdb"))
+    result = tool_module.drain_cockroach_node(2, "cockroachdb", "cockroachdb")
 
-    assert result["status"] == "success"
+    assert result == "Started CockroachDB drain for node 2 in StatefulSet cockroachdb."
     assert provider.execs[0][2][2] == "2"
 
 
-def test_semantic_scale_up_uses_cluster_tool(tool_module, monkeypatch):
+def test_semantic_scale_up_uses_statefulset_tool(tool_module, monkeypatch):
     tool_module.cockroach_provider = FakeCockroachProvider()
     provider = FakeKubernetesProvider()
     tool_module.kubernetes_provider = provider
 
-    result = json.loads(tool_module.scale_cockroach_cluster(3, "cockroachdb", "cockroachdb"))
+    result = tool_module.scale_cockroach_statefulset(3, "cockroachdb", "cockroachdb")
 
-    assert result["status"] == "success"
+    assert result == "Requested scaling CockroachDB StatefulSet cockroachdb to 3 replicas."
     assert provider.scaled == [("cockroachdb", 3)]
 
 
-def test_semantic_scale_down_calls_cluster_tool(tool_module, monkeypatch):
+def test_semantic_scale_down_calls_statefulset_tool(tool_module, monkeypatch):
     class ThreeNodeProvider(FakeKubernetesProvider):
         def status(self):
             return {
@@ -213,10 +209,9 @@ def test_semantic_scale_down_calls_cluster_tool(tool_module, monkeypatch):
     provider = ThreeNodeProvider()
     tool_module.kubernetes_provider = provider
 
-    result = json.loads(tool_module.scale_cockroach_cluster(2, "cockroachdb", "cockroachdb"))
+    result = tool_module.scale_cockroach_statefulset(2, "cockroachdb", "cockroachdb")
 
-    assert result["status"] == "success"
-    assert result["changed"] is True
+    assert result == "Requested scaling CockroachDB StatefulSet cockroachdb to 2 replicas."
     assert provider.scaled == [("cockroachdb", 2)]
 
 
@@ -234,9 +229,9 @@ def test_semantic_decommission_does_not_block_on_cluster_health(tool_module, mon
     provider = UnhealthyProvider()
     tool_module.kubernetes_provider = provider
 
-    result = json.loads(tool_module.decommission_cockroach_node(1, "cockroachdb", "cockroachdb"))
+    result = tool_module.decommission_cockroach_node(1, "cockroachdb", "cockroachdb")
 
-    assert result["status"] == "success"
+    assert result == "Requested decommission of CockroachDB node 1."
     assert provider.execs == [
         (
             "cockroachdb-0",
@@ -246,7 +241,7 @@ def test_semantic_decommission_does_not_block_on_cluster_health(tool_module, mon
                 "decommission",
                 "1",
                 "--insecure",
-                "--host=cockroachdb-0.cockroachdb.cockroachdb.svc.cluster.local:26357",
+                f"--host=cockroachdb-0.cockroachdb.cockroachdb.svc.cluster.local:{tool_module.settings.grpc_port}",
             ],
         )
     ]
@@ -257,10 +252,9 @@ def test_semantic_volume_expansion_calls_provider_without_storage_precheck(tool_
     provider = FakeKubernetesProvider()
     tool_module.kubernetes_provider = provider
 
-    result = json.loads(tool_module.expand_data_volume(1, 10, "cockroachdb", "cockroachdb"))
+    result = tool_module.expand_data_volume(1, 10, "cockroachdb", "cockroachdb")
 
-    assert result["status"] == "success"
-    assert result["changed"] is True
+    assert result == "Requested expansion of CockroachDB node 1 data volume to 10Gi."
     assert provider.expanded == [(1, 10)]
 
 
@@ -268,11 +262,9 @@ def test_semantic_create_backup_calls_provider(tool_module):
     tool_module.cockroach_provider = FakeCockroachProvider()
     tool_module.kubernetes_provider = FakeKubernetesProvider()
 
-    result = json.loads(tool_module.create_backup("cockroachdb", "cockroachdb"))
+    result = tool_module.create_backup("cockroachdb", "cockroachdb")
 
-    assert result["status"] == "failed"
-    assert result["backup_id"] is None
-    assert result["evidence"]["error"] == "provider does not implement create_backup"
+    assert result == "Error: create_backup failed: provider does not implement create_backup"
 
 
 def test_node_health_avoids_internal_tables():

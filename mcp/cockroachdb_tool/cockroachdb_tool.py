@@ -52,7 +52,9 @@ class ToolSettings(BaseSettings):
 settings = ToolSettings()
 
 
-def _json(data: dict[str, Any] | list[Any]) -> str:
+def _json(data: Any) -> str:
+    if isinstance(data, str):
+        return data
     return json.dumps(data, indent=2, default=str)
 
 
@@ -158,7 +160,7 @@ def drain_cockroach_node(
         )
     except Exception as exc:
         logger.exception("drain_cockroach_node failed")
-        return _json({"error": str(exc), "changed": False, "node_id": node_id})
+        return f"Error: drain_cockroach_node failed: {exc}"
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": False})
@@ -180,7 +182,7 @@ def wait_for_node_ready(
         )
     except Exception as exc:
         logger.exception("wait_for_node_ready failed")
-        return _json({"error": str(exc), "changed": False, "node_id": node_id})
+        return f"Error: wait_for_node_ready failed: {exc}"
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": False})
@@ -200,7 +202,7 @@ def wait_for_cluster_healthy(
         )
     except Exception as exc:
         logger.exception("wait_for_cluster_healthy failed")
-        return _json({"error": str(exc), "changed": False})
+        return f"Error: wait_for_cluster_healthy failed: {exc}"
 
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False})
@@ -220,7 +222,7 @@ def restart_cockroach_node(
         )
     except Exception as exc:
         logger.exception("restart_cockroach_node failed")
-        return _json({"error": str(exc), "changed": False, "node_id": node_id})
+        return f"Error: restart_cockroach_node failed: {exc}"
 
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False})
@@ -240,11 +242,11 @@ def delete_cockroach_pod(
         )
     except Exception as exc:
         logger.exception("delete_cockroach_pod failed")
-        return _json({"error": str(exc), "changed": False, "pod_name": pod_name})
+        return f"Error: delete_cockroach_pod failed: {exc}"
 
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True})
-def scale_cockroach_cluster(
+def scale_cockroach_statefulset(
     target_replicas: int,
     namespace: str | None = None,
     cluster: str | None = None,
@@ -252,15 +254,15 @@ def scale_cockroach_cluster(
     """Scale the CockroachDB StatefulSet replica count."""
     try:
         return _json(
-            _operations().scale_cockroach_cluster(
+            _operations().scale_cockroach_statefulset(
                 namespace or settings.k8s_namespace,
                 cluster or settings.statefulset_name,
                 target_replicas,
             )
         )
     except Exception as exc:
-        logger.exception("scale_cockroach_cluster failed")
-        return _json({"error": str(exc), "changed": False, "target_replicas": target_replicas})
+        logger.exception("scale_cockroach_statefulset failed")
+        return f"Error: scale_cockroach_statefulset failed: {exc}"
 
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False})
@@ -280,7 +282,7 @@ def decommission_cockroach_node(
         )
     except Exception as exc:
         logger.exception("decommission_cockroach_node failed")
-        return _json({"error": str(exc), "changed": False, "node_id": node_id})
+        return f"Error: decommission_cockroach_node failed: {exc}"
 
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True})
@@ -302,7 +304,7 @@ def expand_data_volume(
         )
     except Exception as exc:
         logger.exception("expand_data_volume failed")
-        return _json({"error": str(exc), "changed": False, "node_id": node_id})
+        return f"Error: expand_data_volume failed: {exc}"
 
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False})
@@ -312,7 +314,7 @@ def create_backup(
     backup_scope: str = "cluster",
     database: str | None = None,
 ) -> str:
-    """Create a typed CockroachDB backup operation receipt."""
+    """Request a CockroachDB backup."""
     try:
         return _json(
             _operations().create_backup(
@@ -324,7 +326,7 @@ def create_backup(
         )
     except Exception as exc:
         logger.exception("create_backup failed")
-        return _json({"error": str(exc), "changed": False})
+        return f"Error: create_backup failed: {exc}"
 
 
 def run_server():

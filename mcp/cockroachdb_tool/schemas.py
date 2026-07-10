@@ -40,8 +40,6 @@ class OperationReceipt(BaseModel):
     status: Literal["success", "failed"] = "success"
     changed: bool
     message: str
-    state_before: dict[str, Any] = Field(default_factory=dict)
-    state_after: dict[str, Any] = Field(default_factory=dict)
     evidence: dict[str, Any] = Field(default_factory=dict)
     details: dict[str, Any] = Field(default_factory=dict)
 
